@@ -67,3 +67,25 @@ export function prepareBody(
     sent: edited.body as object,
   }
 }
+
+/**
+ * Put a request on the model its agent is pinned to. Returns the model it was
+ * moved from, or undefined when nothing changed.
+ *
+ * OpenCode sometimes runs a subagent on its parent's model rather than the one
+ * the agent declares, so the pin is applied where it cannot be skipped: on the
+ * body that goes out.
+ */
+export function pinAgentModel(
+  parsed: unknown,
+  agent: string | null | undefined,
+  pins: Readonly<Record<string, string>>,
+): string | undefined {
+  const want = agent ? pins[agent] : undefined
+  if (!want || !parsed || typeof parsed !== "object") return undefined
+  const body = parsed as { model?: unknown }
+  if (typeof body.model !== "string" || body.model === want) return undefined
+  const from = body.model
+  body.model = want
+  return from
+}

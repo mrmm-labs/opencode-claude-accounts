@@ -18,6 +18,7 @@ import {
   quotaForAccount,
   readQuotaCache,
   SESSION_HEADER,
+  AGENT_HEADER,
   assess,
   credentialState,
   describeSelection,
@@ -58,7 +59,7 @@ import {
   LONG_CONTEXT_BETAS,
 } from "./betas.ts"
 import { SYSTEM_IDENTITY, transformResponseStream } from "./transforms.ts"
-import { prepareBody } from "./request-body.ts"
+import { pinAgentModel, prepareBody } from "./request-body.ts"
 import {
   AUTO_SOURCE,
   PRESET_PREFIX,
@@ -330,6 +331,7 @@ export function buildRequestHeaders(
   // chat.headers to the fetch above, and every header here is forwarded, so it
   // is removed centrally rather than at each call site.
   headers.delete(SESSION_HEADER)
+  headers.delete(AGENT_HEADER)
 
   const modelBetas = getModelBetas(modelId, excludedBetas)
   const incomingBeta = headers.get("anthropic-beta") ?? ""
@@ -802,6 +804,7 @@ const plugin: PluginWithOptions = async (
       if (bind) {
         output.headers[SESSION_HEADER] = input.sessionID
       }
+      if (input.agent) output.headers[AGENT_HEADER] = input.agent
       log("chat_headers", {
         sessionID: input.sessionID,
         agent: input.agent,
@@ -932,6 +935,22 @@ const plugin: PluginWithOptions = async (
               try {
                 parsedBody = JSON.parse(bodyStr)
               } catch {}
+            }
+            const agent = new Headers((init?.headers ?? {}) as HeadersInit).get(
+              AGENT_HEADER,
+            )
+            const pinnedFrom = pinAgentModel(
+              parsedBody,
+              agent,
+              getConfig().agentModels,
+            )
+            if (pinnedFrom) {
+              steps.push("agent-model")
+              log("agent_model_pinned", {
+                agent,
+                from: pinnedFrom,
+                to: (parsedBody as { model: string }).model,
+              })
             }
             const modelId =
               (parsedBody as { model?: string } | undefined)?.model ?? "unknown"

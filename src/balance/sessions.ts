@@ -286,6 +286,8 @@ export function resolveForSession(
  * once, for every session. Stripped before the request leaves.
  */
 export const SESSION_HEADER = "x-claude-auth-session"
+/** Carries the agent name from chat.headers to the fetch, for agentModels. */
+export const AGENT_HEADER = "x-claude-auth-agent"
 
 /**
  * Credentials for this session's own account.
