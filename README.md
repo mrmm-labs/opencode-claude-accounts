@@ -952,6 +952,7 @@ true, because ten keys had previously drifted into being file-only.
 | `preset`               | `CLAUDE_AUTH_PRESET`                     |
 | `tools`                | `CLAUDE_AUTH_TOOLS`                      |
 | `contextLimit`         | `CLAUDE_AUTH_CONTEXT_LIMIT`              |
+| `agentModels`          | `CLAUDE_AUTH_AGENT_MODELS` (JSON)        |
 | `captureRequests`      | `CLAUDE_AUTH_CAPTURE_REQUESTS`           |
 
 Names follow `camelCase` -> `CLAUDE_AUTH_SCREAMING_SNAKE`, except the six that
@@ -1042,6 +1043,25 @@ OpenCode compacts a session against the model's context window, so on a 1M model
 ```
 
 OpenCode 2 only, read at start-up. Models whose window is already smaller are left alone.
+
+## Pinning agents to a model
+
+A subagent can end up on its parent session's model instead of the one its
+agent file declares. `agentModels` puts each named agent's requests on a fixed
+model, rewritten on the request that goes out, so the pin cannot be skipped:
+
+```jsonc
+// ~/.config/opencode/claude-auth.jsonc
+{
+  "agentModels": {
+    "general": "claude-sonnet-5-5",
+    "reviewer-code": "claude-sonnet-5-5",
+  },
+}
+```
+
+Each rewrite is logged as `agent_model_pinned`. OpenCode's own cost figures
+still use the model it chose, not the one sent.
 
 ## Validating OAuth refresh
 

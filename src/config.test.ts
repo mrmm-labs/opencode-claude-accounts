@@ -425,6 +425,7 @@ describe("config surface coverage", () => {
     contextEditing: '{"trigger":120000,"keep":4}',
     weights: '{"Acme 1":3}',
     accountNames: '{"Acme 1":"Team 1"}',
+    agentModels: '{"general":"claude-sonnet-5-5"}',
     retryPrefillError: "1",
     captureRequests: "messages",
     useCredits: "0",
@@ -581,5 +582,21 @@ describe("parseGroups", () => {
         Alt: { accounts: ["a"] },
       },
     )
+  })
+})
+
+describe("agentModels", () => {
+  it("keeps agent -> model pins and drops the provider prefix", () => {
+    assert.deepEqual(
+      sanitize({
+        agentModels: {
+          general: "anthropic/claude-sonnet-5-5",
+          "reviewer-ui": "claude-sonnet-5-5",
+          bad: 3,
+        },
+      }).agentModels,
+      { general: "claude-sonnet-5-5", "reviewer-ui": "claude-sonnet-5-5" },
+    )
+    assert.deepEqual(DEFAULT_CONFIG.agentModels, {})
   })
 })

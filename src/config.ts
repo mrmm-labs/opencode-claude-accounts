@@ -707,6 +707,12 @@ export type ClaudeAuthConfig = {
    * here can be anything at all -- it is a label, not an identifier.
    */
   accountNames: Record<string, string>
+  /**
+   * Model each agent must run on, by agent name: `{ "general": "claude-sonnet-5-5" }`.
+   * Rewritten on the wire, so it holds even where OpenCode hands a subagent
+   * its parent's model instead of the one the agent declares.
+   */
+  agentModels: Record<string, string>
   retryPrefillError: boolean
   captureRequests: CaptureLevel
   /** Named, switchable arrangements. Offered as rows in the switcher. */
@@ -763,6 +769,7 @@ export const DEFAULT_CONFIG: ClaudeAuthConfig = {
   pools: [],
   ejectFor: 5 * 60_000,
   accountNames: {},
+  agentModels: {},
   retryPrefillError: false,
   captureRequests: "off",
   presets: {},
@@ -970,6 +977,12 @@ export function sanitize(raw: unknown): Partial<ClaudeAuthConfig> {
 
   const names = parseAccountNames(r.accountNames)
   if (names) out.accountNames = names
+  // Same shape: a string per key. "anthropic/<id>" is accepted as written.
+  const pins = parseAccountNames(r.agentModels)
+  if (pins)
+    out.agentModels = Object.fromEntries(
+      Object.entries(pins).map(([a, m]) => [a, m.replace(/^anthropic\//, "")]),
+    )
 
   if (typeof r.retryPrefillError === "boolean")
     out.retryPrefillError = r.retryPrefillError
@@ -1108,6 +1121,13 @@ const ENV_PARSERS: Record<string, EnvParser> = {
   accountNames: (v) => {
     try {
       return parseAccountNames(JSON.parse(v))
+    } catch {
+      return undefined
+    }
+  },
+  agentModels: (v) => {
+    try {
+      return sanitize({ agentModels: JSON.parse(v) }).agentModels
     } catch {
       return undefined
     }

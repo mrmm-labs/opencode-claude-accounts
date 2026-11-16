@@ -3,7 +3,7 @@ import { describe, it } from "node:test"
 
 import { resolveContextEditing } from "./balance/index.ts"
 import { DEFAULT_CONFIG } from "./config.ts"
-import { prepareBody } from "./request-body.ts"
+import { pinAgentModel, prepareBody } from "./request-body.ts"
 
 const settings = resolveContextEditing({
   ...DEFAULT_CONFIG,
@@ -70,5 +70,27 @@ describe("prepareBody", () => {
     assert.equal(prepareBody("not json", undefined, {}).body, "not json")
     const blob = new Blob(["x"])
     assert.equal(prepareBody(blob, undefined, {}).body, blob)
+  })
+})
+
+// Regression: subagents declared on Sonnet ran on their parent's Opus, half of
+// a week's spend; the pin is applied to the body that goes out.
+describe("pinAgentModel", () => {
+  const pins = { general: "claude-sonnet-5-5" }
+
+  it("moves a pinned agent's request to its model", () => {
+    const body = { model: "claude-opus-5-5", messages: [] }
+    assert.equal(pinAgentModel(body, "general", pins), "claude-opus-5-5")
+    assert.equal(body.model, "claude-sonnet-5-5")
+  })
+
+  it("leaves everything else alone", () => {
+    const body = { model: "claude-opus-5-5" }
+    assert.equal(pinAgentModel(body, "build", pins), undefined)
+    assert.equal(pinAgentModel(body, null, pins), undefined)
+    assert.equal(pinAgentModel(undefined, "general", pins), undefined)
+    assert.equal(body.model, "claude-opus-5-5")
+    const already = { model: "claude-sonnet-5-5" }
+    assert.equal(pinAgentModel(already, "general", pins), undefined)
   })
 })
