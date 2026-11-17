@@ -15,6 +15,8 @@
  *   auth.loader (zero cost)      -> model transform
  *   auth.methods (switcher)      -> integration OAuth method
  *   tool                         -> tool transform
+ *   tool.execute.before/after    -> tool hooks execute.before/after
+ *   event (session title/parent) -> session.get, once per session
  *
  * There is one V1 plugin instance per V2 plugin instance, so the balancer,
  * timers and caches behave exactly as they did under V1.
@@ -208,10 +210,35 @@ export async function setup(ctx: Context, v1: V1Plugin) {
 
   // --- Session hooks -------------------------------------------------------
   const chatHeaders = hooks["chat.headers"]
+  const onEvent = hooks.event
+  const described = new Set<string>()
+  // V2 has no session event for plugins here; ask once per session instead.
+  const describe = (sessionID: string) => {
+    if (!onEvent || described.has(sessionID)) return
+    described.add(sessionID)
+    ctx.session
+      .get({ sessionID } as never)
+      .then((info: { title?: string; parentID?: string }) =>
+        onEvent({
+          event: {
+            type: "session.updated",
+            properties: {
+              info: {
+                id: sessionID,
+                title: info?.title,
+                parentID: info?.parentID,
+              },
+            },
+          },
+        } as never),
+      )
+      .catch(() => described.delete(sessionID))
+  }
   if (chatHeaders) {
     await ctx.session.hook(
       "model.request",
       async (event) => {
+        describe(event.sessionID)
         await chatHeaders(
           {
             sessionID: event.sessionID,
@@ -223,6 +250,42 @@ export async function setup(ctx: Context, v1: V1Plugin) {
       },
       { providerID: PROVIDER_ID },
     )
+  }
+
+  const toolBefore = hooks["tool.execute.before"]
+  const toolAfter = hooks["tool.execute.after"]
+  if (toolBefore) {
+    await ctx.tool.hook("execute.before", async (e) => {
+      await toolBefore(
+        { tool: e.tool, sessionID: e.sessionID, callID: e.id } as never,
+        { args: e.input } as never,
+      )
+    })
+  }
+  if (toolAfter) {
+    await ctx.tool.hook("execute.after", async (e) => {
+      await toolAfter(
+        {
+          tool: e.tool,
+          sessionID: e.sessionID,
+          callID: e.id,
+          args: e.input,
+        } as never,
+        {
+          title: "",
+          output:
+            e.status === "completed" ? JSON.stringify(e.result ?? "") : "",
+          metadata:
+            e.status === "error"
+              ? {
+                  error: String(
+                    (e.error as { message?: string })?.message ?? e.error,
+                  ),
+                }
+              : {},
+        } as never,
+      )
+    })
   }
 
   const systemTransform = hooks["experimental.chat.system.transform"]

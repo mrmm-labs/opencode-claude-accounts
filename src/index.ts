@@ -61,6 +61,29 @@ import {
 import { SYSTEM_IDENTITY, transformResponseStream } from "./transforms.ts"
 import { pinAgentModel, prepareBody } from "./request-body.ts"
 import { trimPrompt } from "./prompt-trim.ts"
+import { Exporter, mcpServer, ToolTimer } from "./otel.ts"
+
+// Tracing state. Session metadata comes from OpenCode's events and chat hooks;
+// the exporter is a no-op until `otel.endpoint` is set.
+const otel = new Exporter(() => getConfig().otel)
+const toolTimer = new ToolTimer()
+const sessionMeta = new Map<
+  string,
+  { title?: string; parent?: string; agent?: string }
+>()
+const meta = (id: string) => {
+  let m = sessionMeta.get(id)
+  if (!m) sessionMeta.set(id, (m = {}))
+  return m
+}
+const sessionAttrs = (id: string | undefined) => {
+  const m = id ? sessionMeta.get(id) : undefined
+  return {
+    "opencode.session.title": m?.title,
+    "opencode.session.parent": m?.parent,
+    "opencode.agent": m?.agent,
+  }
+}
 import {
   AUTO_SOURCE,
   PRESET_PREFIX,
@@ -797,6 +820,50 @@ const plugin: PluginWithOptions = async (
   return {
     ...(registeredTools ? { tool: registeredTools } : {}),
 
+    event: async ({ event }) => {
+      const e = event as {
+        type?: string
+        properties?: { info?: Record<string, unknown> }
+      }
+      const info = e.properties?.info
+      if (!e.type?.startsWith("session.") || typeof info?.id !== "string")
+        return
+      const m = meta(info.id)
+      if (typeof info.title === "string") m.title = info.title
+      const parent = info.parentID ?? info.parentId
+      if (typeof parent === "string") m.parent = parent
+    },
+
+    "tool.execute.before": async (input) => {
+      toolTimer.begin(input.callID)
+    },
+
+    "tool.execute.after": async (input, output) => {
+      const start = toolTimer.end(input.callID)
+      if (start === undefined) return
+      const server = mcpServer(input.tool)
+      const failed = (output?.metadata as { error?: unknown } | undefined)
+        ?.error
+      otel.add({
+        name: `tool ${input.tool}`,
+        session: input.sessionID,
+        start,
+        end: Date.now(),
+        ...(failed ? { error: String(failed).slice(0, 120) } : {}),
+        attrs: {
+          ...sessionAttrs(input.sessionID),
+          "gen_ai.tool.name": input.tool,
+          "gen_ai.tool.call.id": input.callID,
+          "mcp.server": server,
+          // Size only: tool output can hold secrets.
+          "tool.output.bytes":
+            typeof output?.output === "string"
+              ? output.output.length
+              : undefined,
+        },
+      })
+    },
+
     // The only place a session id is available. Stamped as a header because the
     // custom fetch below cannot otherwise know which session a request belongs
     // to — the provider is registered once, for all of them.
@@ -806,6 +873,7 @@ const plugin: PluginWithOptions = async (
         output.headers[SESSION_HEADER] = input.sessionID
       }
       if (input.agent) output.headers[AGENT_HEADER] = input.agent
+      if (input.agent) meta(input.sessionID).agent = input.agent
       log("chat_headers", {
         sessionID: input.sessionID,
         agent: input.agent,
@@ -1410,6 +1478,7 @@ const plugin: PluginWithOptions = async (
             // for a non-streamed response, or once the tee below has drained for
             // a chat stream. The same call feeds the long-memory sample buckets.
             const servedBy = servingSource
+            const headersAt = Date.now()
             const u5 = observedQuota?.fiveHour?.utilization
             const u7 = observedQuota?.sevenDay?.utilization
             let recorded = false
@@ -1417,6 +1486,35 @@ const plugin: PluginWithOptions = async (
               if (!servedBy || recorded) return
               recorded = true
               const account = accountKey(servedBy)
+              otel.add({
+                name: `chat ${modelId}`,
+                session: ocSessionId ?? undefined,
+                start: startedAt,
+                end: Date.now(),
+                ...(response.status >= 400
+                  ? { error: `HTTP ${response.status}` }
+                  : {}),
+                attrs: {
+                  ...sessionAttrs(ocSessionId ?? undefined),
+                  "opencode.agent":
+                    agent ??
+                    sessionAttrs(ocSessionId ?? undefined)["opencode.agent"],
+                  "gen_ai.system": "anthropic",
+                  "gen_ai.request.model": modelId,
+                  "gen_ai.usage.input_tokens": usage?.input,
+                  "gen_ai.usage.output_tokens": usage?.output,
+                  "gen_ai.usage.cache_read_tokens": usage?.cacheRead,
+                  "gen_ai.usage.cache_write_tokens": usage
+                    ? usage.cacheWrite + usage.cacheWrite1h
+                    : undefined,
+                  "http.response.status_code": response.status,
+                  "claude_accounts.account": account,
+                  "claude_accounts.steps": steps.join(","),
+                  "claude_accounts.time_to_headers_ms": headersAt - startedAt,
+                  "claude_accounts.utilization_5h": u5,
+                  "claude_accounts.utilization_7d": u7,
+                },
+              })
               recordRequest({
                 account,
                 model: modelId,
