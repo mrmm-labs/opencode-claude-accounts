@@ -9,14 +9,14 @@
     "opencode",
     "plugin"
   ],
-  "homepage": "https://github.com/mrmm/opencode-claude-accounts#readme",
+  "homepage": "https://github.com/mrmm-labs/opencode-claude-accounts#readme",
   "bugs": {
-    "url": "https://github.com/mrmm/opencode-claude-accounts/issues"
+    "url": "https://github.com/mrmm-labs/opencode-claude-accounts/issues"
   },
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mrmm/opencode-claude-accounts.git"
+    "url": "git+https://github.com/mrmm-labs/opencode-claude-accounts.git"
   },
   "files": [
     "opencode-claude-auth.js",

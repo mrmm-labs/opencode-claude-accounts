@@ -1,7 +1,7 @@
 # opencode-claude-accounts
 
 [![npm](https://img.shields.io/npm/v/opencode-claude-accounts)](https://www.npmjs.com/package/opencode-claude-accounts)
-[![CI](https://github.com/mrmm/opencode-claude-accounts/actions/workflows/ci.yml/badge.svg)](https://github.com/mrmm/opencode-claude-accounts/actions/workflows/ci.yml)
+[![CI](https://github.com/mrmm-labs/opencode-claude-accounts/actions/workflows/ci.yml/badge.svg)](https://github.com/mrmm-labs/opencode-claude-accounts/actions/workflows/ci.yml)
 [![Socket Badge](https://socket.dev/api/badge/npm/package/opencode-claude-accounts)](https://socket.dev/npm/package/opencode-claude-accounts)
 
 Self-contained Anthropic auth provider for OpenCode using your Claude Code credentials — no separate login or API key needed.
@@ -10,15 +10,15 @@ Self-contained Anthropic auth provider for OpenCode using your Claude Code crede
 
 Taken by every release from demo accounts: one capture of the real TUI (`scripts/tui-capture/`) and one rendered image per feature (`scripts/screenshots.ts`). These always show the latest release.
 
-![The real OpenCode TUI, with a demo account](https://github.com/mrmm/opencode-claude-accounts/releases/latest/download/tui.png)
+![The real OpenCode TUI, with a demo account](https://github.com/mrmm-labs/opencode-claude-accounts/releases/latest/download/tui.png)
 
-| Sidebar                                                                                                                                            | Forecast                                                                                            |
-| -------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| ![Sidebar: accounts as a tree, gauges and reset countdowns](https://github.com/mrmm/opencode-claude-accounts/releases/latest/download/sidebar.png) | ![Forecast](https://github.com/mrmm/opencode-claude-accounts/releases/latest/download/forecast.png) |
+| Sidebar                                                                                                                                                 | Forecast                                                                                                 |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| ![Sidebar: accounts as a tree, gauges and reset countdowns](https://github.com/mrmm-labs/opencode-claude-accounts/releases/latest/download/sidebar.png) | ![Forecast](https://github.com/mrmm-labs/opencode-claude-accounts/releases/latest/download/forecast.png) |
 
-![Account picker](https://github.com/mrmm/opencode-claude-accounts/releases/latest/download/picker.png)
+![Account picker](https://github.com/mrmm-labs/opencode-claude-accounts/releases/latest/download/picker.png)
 
-![claude_accounts_status tool](https://github.com/mrmm/opencode-claude-accounts/releases/latest/download/status.png)
+![claude_accounts_status tool](https://github.com/mrmm-labs/opencode-claude-accounts/releases/latest/download/status.png)
 
 ## How it works
 
@@ -45,7 +45,7 @@ macOS is preferred (uses Keychain). Linux and Windows work via the credentials f
 Paste this into any LLM agent (Claude Code, OpenCode, Cursor, etc.):
 
 ```
-Install the opencode-claude-accounts plugin and configure it by following: https://raw.githubusercontent.com/mrmm/opencode-claude-accounts/main/installation.md
+Install the opencode-claude-accounts plugin and configure it by following: https://raw.githubusercontent.com/mrmm-labs/opencode-claude-accounts/main/installation.md
 ```
 
 **Option B: Manual setup**
