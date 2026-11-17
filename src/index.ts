@@ -61,6 +61,7 @@ import {
 import { SYSTEM_IDENTITY, transformResponseStream } from "./transforms.ts"
 import { pinAgentModel, prepareBody } from "./request-body.ts"
 import { trimPrompt } from "./prompt-trim.ts"
+import { newHookStats, runBefore, runResponse } from "./hooks.ts"
 import {
   costUsd,
   Exporter,
@@ -107,6 +108,13 @@ export {
   LONG_CONTEXT_BETAS,
 } from "./betas.ts"
 export { resetExcludedBetas } from "./betas.ts"
+export type {
+  BeforeHook,
+  HookContext,
+  HookRequest,
+  Hooks,
+  ResponseHook,
+} from "./hooks.ts"
 import { isPrefillError, stripTrailingAssistant } from "./prefill.ts"
 export {
   stripToolPrefix,
@@ -1140,12 +1148,44 @@ const plugin: PluginWithOptions = async (
               .filter(Boolean)
             log("fetch_headers_built", { headerKeys, betas, modelId })
 
+            // Other plugins' hooks see a Messages POST and nothing else. Each
+            // outgoing attempt passes through `send`, so a retry runs the
+            // before hooks again on the body it is about to send, once.
+            const hookStats = newHookStats()
+            const hookable =
+              (init?.method ?? "POST").toUpperCase() === "POST" &&
+              requestPath.endsWith("/v1/messages")
+            const hookCtx = {
+              url: String(requestUrl),
+              ...(agent ? { agent } : {}),
+              ...(ocSessionId ? { sessionID: ocSessionId } : {}),
+            }
+            let lastSent: {
+              body: BodyInit | null | undefined
+              headers: Headers
+            } = { body, headers }
+            const send = async (
+              sendBody: BodyInit | null | undefined,
+              sendHeaders: Headers,
+            ): Promise<Response> => {
+              let out = sendBody
+              if (hookable && typeof sendBody === "string") {
+                out = await runBefore(
+                  sendBody,
+                  { ...hookCtx, headers: sendHeaders },
+                  hookStats,
+                )
+              }
+              lastSent = { body: out, headers: sendHeaders }
+              return fetchWithRetry(requestUrl, {
+                ...requestInit,
+                body: out,
+                headers: sendHeaders,
+              })
+            }
+
             const startedAt = Date.now()
-            let response = await fetchWithRetry(requestUrl, {
-              ...requestInit,
-              body,
-              headers,
-            })
+            let response = await send(body, headers)
 
             log("fetch_response", {
               status: response.status,
@@ -1194,11 +1234,7 @@ const plugin: PluginWithOptions = async (
                   modelId,
                   excluded,
                 )
-                response = await fetchWithRetry(requestUrl, {
-                  ...requestInit,
-                  body,
-                  headers: retryHeaders,
-                })
+                response = await send(body, retryHeaders)
               } else {
                 preserveResponseUnchanged = true
               }
@@ -1234,17 +1270,16 @@ const plugin: PluginWithOptions = async (
                   }
                   const creds = getCachedCredentials()
                   const before = Date.now()
-                  response = await fetchWithRetry(requestUrl, {
-                    ...requestInit,
-                    body: trimmed.body,
-                    headers: buildRequestHeaders(
+                  response = await send(
+                    trimmed.body,
+                    buildRequestHeaders(
                       input,
                       requestInit,
                       creds?.accessToken ?? latest.accessToken,
                       modelId,
                       getExcludedBetas(modelId),
                     ),
-                  })
+                  )
                   const recovered = response.status < 400
                   log(
                     recovered ? "prefill_recovered" : "prefill_retry_failed",
@@ -1292,17 +1327,16 @@ const plugin: PluginWithOptions = async (
                 contextEdited = false
                 log("context_edit_disabled", { level: "warn", modelId })
                 const creds = getCachedCredentials()
-                response = await fetchWithRetry(requestUrl, {
-                  ...requestInit,
-                  body: withoutEditing(),
-                  headers: buildRequestHeaders(
+                response = await send(
+                  withoutEditing(),
+                  buildRequestHeaders(
                     input,
                     requestInit,
                     creds?.accessToken ?? latest.accessToken,
                     modelId,
                     getExcludedBetas(modelId),
                   ),
-                })
+                )
               }
             }
 
@@ -1348,11 +1382,7 @@ const plugin: PluginWithOptions = async (
                 newExcluded,
               )
 
-              response = await fetchWithRetry(requestUrl, {
-                ...requestInit,
-                body,
-                headers: newHeaders,
-              })
+              response = await send(body, newHeaders)
             }
 
             // A 429 that survived every retry above is a real exhaustion, not
@@ -1378,17 +1408,16 @@ const plugin: PluginWithOptions = async (
                   to: rotated?.source,
                   strategy: rotated?.strategy,
                 })
-                response = await fetchWithRetry(requestUrl, {
-                  ...requestInit,
+                response = await send(
                   body,
-                  headers: buildRequestHeaders(
+                  buildRequestHeaders(
                     input,
                     requestInit,
                     rotatedCreds.accessToken,
                     modelId,
                     getExcludedBetas(modelId),
                   ),
-                })
+                )
                 preserveResponseUnchanged = false
               }
             }
@@ -1414,6 +1443,26 @@ const plugin: PluginWithOptions = async (
                   retryAfterS: plan.retryAfterS,
                   upstream: spent.upstream,
                 })
+                preserveResponseUnchanged = false
+              }
+            }
+
+            // The response as it will be returned: other plugins may wrap its
+            // stream, or send one more request through `resend`.
+            if (hookable) {
+              const hooked = await runResponse(
+                response,
+                { ...hookCtx, ...lastSent },
+                (resendBody, resendHeaders) =>
+                  fetchWithRetry(requestUrl, {
+                    ...requestInit,
+                    body: resendBody,
+                    headers: resendHeaders,
+                  }),
+                hookStats,
+              )
+              if (hooked !== response) {
+                response = hooked
                 preserveResponseUnchanged = false
               }
             }
@@ -1551,6 +1600,13 @@ const plugin: PluginWithOptions = async (
                     : undefined,
                   "claude_accounts.utilization_5h": u5,
                   "claude_accounts.utilization_7d": u7,
+                  ...(hookStats.before + hookStats.response > 0
+                    ? {
+                        "hooks.before": hookStats.before,
+                        "hooks.response": hookStats.response,
+                        "hooks.errors": hookStats.errors,
+                      }
+                    : {}),
                 },
               })
               recordRequest({

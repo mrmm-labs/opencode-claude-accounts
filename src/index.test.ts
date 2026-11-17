@@ -2191,3 +2191,253 @@ describe("quota attribution — the account that served, not the one now active"
     }
   })
 })
+
+describe("hooks for other plugins", () => {
+  type Sent = { url: string; body: string; headers: Headers }
+  type Registry = {
+    before: unknown[]
+    response: unknown[]
+  }
+  const KEY = "__claudeAccountsHooks"
+  const BODY = JSON.stringify({
+    model: "claude-opus-4-8",
+    messages: [{ role: "user", content: "hi" }],
+  })
+  const MESSAGES = "https://api.anthropic.com/v1/messages"
+
+  async function withPlugin(
+    upstream: (n: number, sent: Sent) => Response | Promise<Response>,
+    run: (ctx: {
+      fetch: (url: string, init?: RequestInit) => Promise<Response>
+      sent: Sent[]
+      registry: Registry
+    }) => Promise<void>,
+  ): Promise<void> {
+    const originalHome = process.env.HOME
+    const originalFetch = globalThis.fetch
+    process.env.HOME = await mkdtemp(
+      join(tmpdir(), "opencode-claude-auth-home-"),
+    )
+    const registry: Registry = { before: [], response: [] }
+    ;(globalThis as Record<string, unknown>)[KEY] = registry
+    const sent: Sent[] = []
+    try {
+      const { helpersModule } = await loadHelpersWithCountingKeychain(
+        Date.now() + 10 * 60_000,
+      )
+      globalThis.fetch = (async (
+        url: RequestInfo | URL,
+        init?: RequestInit,
+      ) => {
+        const s = {
+          url: String(url),
+          body: String(init?.body),
+          headers: new Headers(init?.headers),
+        }
+        sent.push(s)
+        return upstream(sent.length, s)
+      }) as typeof fetch
+      const plugin = await helpersModule.default({} as never)
+      const authConfig = await (
+        plugin as { auth: { loader: TestAuthLoader } }
+      ).auth.loader(
+        async () => ({
+          type: "oauth",
+          refresh: "refresh",
+          access: "access",
+          expires: Date.now() + 60_000,
+        }),
+        { models: {} },
+      )
+      await run({ fetch: authConfig.fetch, sent, registry })
+    } finally {
+      delete (globalThis as Record<string, unknown>)[KEY]
+      globalThis.fetch = originalFetch
+      if (typeof originalHome === "string") process.env.HOME = originalHome
+      else delete process.env.HOME
+    }
+  }
+
+  const ok = () => new Response("{}", { status: 200 })
+  const post = (body = BODY): RequestInit => ({ method: "POST", body })
+
+  it("a before hook's body and header changes reach fetch", async () => {
+    await withPlugin(ok, async ({ fetch, sent, registry }) => {
+      const seen: Record<string, unknown> = {}
+      registry.before.push((req: Record<string, any>) => {
+        Object.assign(seen, {
+          url: req.url,
+          model: req.model,
+          hasAuth: req.headers.has("authorization"),
+        })
+        req.body.advisor = true
+        req.headers.set(
+          "anthropic-beta",
+          req.headers.get("anthropic-beta") + ",advisor-tool-2026-03-01",
+        )
+      })
+      await (await fetch(MESSAGES, post())).text()
+      assert.equal(sent.length, 1)
+      assert.equal(JSON.parse(sent[0]!.body).advisor, true)
+      assert.match(
+        sent[0]!.headers.get("anthropic-beta")!,
+        /advisor-tool-2026-03-01$/,
+      )
+      assert.deepEqual(seen, {
+        url: `${MESSAGES}?beta=true`,
+        model: "claude-opus-4-8",
+        hasAuth: true,
+      })
+    })
+  })
+
+  it("no hooks registered sends the same bytes as a pass-through hook", async () => {
+    await withPlugin(ok, async ({ fetch, sent, registry }) => {
+      await (await fetch(MESSAGES, post())).text()
+      registry.before.push(() => {})
+      registry.response.push((res: Response) => res)
+      await (await fetch(MESSAGES, post())).text()
+      assert.equal(sent[0]!.body, sent[1]!.body)
+    })
+  })
+
+  it("a response hook can wrap a stream and chunks still arrive one by one", async () => {
+    const enc = new TextEncoder()
+    let push!: (s: string) => void
+    let end!: () => void
+    const upstream = new ReadableStream<Uint8Array>({
+      start(c) {
+        push = (s) => c.enqueue(enc.encode(s))
+        end = () => c.close()
+      },
+    })
+    await withPlugin(
+      () =>
+        new Response(upstream, {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        }),
+      async ({ fetch, registry }) => {
+        registry.response.push((res: Response) => {
+          const ts = new TransformStream<Uint8Array, Uint8Array>({
+            transform(chunk, c) {
+              c.enqueue(
+                enc.encode(
+                  new TextDecoder().decode(chunk).replace(`"n":"a"`, `"n":"A"`),
+                ),
+              )
+            },
+          })
+          return new Response(res.body!.pipeThrough(ts), {
+            status: res.status,
+            headers: res.headers,
+          })
+        })
+        const res = await fetch(MESSAGES, post())
+        const reader = res.body!.getReader()
+        const dec = new TextDecoder()
+        push('event: ping\ndata: {"type":"ping","n":"a"}\n\n')
+        const first = await reader.read()
+        assert.match(dec.decode(first.value), /"n":"A"/)
+        push('event: ping\ndata: {"type":"ping","n":"b"}\n\n')
+        const second = await reader.read()
+        assert.match(dec.decode(second.value), /"n":"b"/)
+        end()
+        assert.equal((await reader.read()).done, true)
+      },
+    )
+  })
+
+  it("throwing hooks are skipped and the turn still succeeds", async () => {
+    await withPlugin(
+      () => new Response('{"ok":1}', { status: 200 }),
+      async ({ fetch, sent, registry }) => {
+        registry.before.push(
+          (req: Record<string, any>) => {
+            req.body.half = true
+            throw new Error("boom")
+          },
+          (req: Record<string, any>) => {
+            req.body.second = true
+          },
+        )
+        registry.response.push(() => {
+          throw new Error("boom")
+        })
+        const res = await fetch(MESSAGES, post())
+        assert.equal(res.status, 200)
+        assert.equal(await res.text(), '{"ok":1}')
+        const body = JSON.parse(sent[0]!.body)
+        assert.equal(body.half, undefined)
+        assert.equal(body.second, true)
+      },
+    )
+  })
+
+  it("leaves other endpoints and methods alone", async () => {
+    await withPlugin(ok, async ({ fetch, sent, registry }) => {
+      let calls = 0
+      registry.before.push(() => void calls++)
+      registry.response.push((res: Response) => (calls++, res))
+      await (await fetch(`${MESSAGES}/count_tokens`, post())).text()
+      await (await fetch("https://api.anthropic.com/v1/models")).text()
+      assert.equal(calls, 0)
+      assert.equal(sent.length, 2)
+    })
+  })
+
+  it("resend goes out once, on the same account, without the before hooks", async () => {
+    await withPlugin(
+      (n) =>
+        new Response(n === 1 ? '{"first":1}' : '{"second":1}', { status: 200 }),
+      async ({ fetch, sent, registry }) => {
+        let before = 0
+        let again: unknown
+        registry.before.push((req: Record<string, any>) => {
+          before++
+          req.body.advisor = true
+        })
+        registry.response.push(async (_res: Response, ctx: any) => {
+          const body = { ...ctx.body }
+          delete body.advisor
+          const res = await ctx.resend(body)
+          again = await ctx.resend(body).catch((e: Error) => e.message)
+          return res
+        })
+        const res = await fetch(MESSAGES, post())
+        assert.equal(await res.text(), '{"second":1}')
+        assert.equal(sent.length, 2)
+        assert.equal(before, 1)
+        assert.equal(JSON.parse(sent[1]!.body).advisor, undefined)
+        assert.equal(
+          sent[1]!.headers.get("authorization"),
+          sent[0]!.headers.get("authorization"),
+        )
+        assert.match(String(again), /once/)
+      },
+    )
+  })
+
+  it("an internal retry runs the before hooks once per attempt", async () => {
+    await withPlugin(
+      (n) =>
+        n === 1
+          ? new Response(
+              '{"error":{"message":"Extra usage is required for long context requests"}}',
+              { status: 400 },
+            )
+          : ok(),
+      async ({ fetch, sent, registry }) => {
+        let before = 0
+        let response = 0
+        registry.before.push(() => void before++)
+        registry.response.push((res: Response) => (response++, res))
+        const res = await fetch(MESSAGES, post())
+        assert.equal(res.status, 200)
+        assert.equal(sent.length, 2)
+        assert.equal(before, 2)
+        assert.equal(response, 1)
+      },
+    )
+  })
+})

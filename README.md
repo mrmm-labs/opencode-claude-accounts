@@ -1108,6 +1108,46 @@ carry no agent are left alone. List every block that follows a dropped one in
 `promptSections`, or it is dropped with it. Each trim is logged as
 `prompt_trimmed` with the bytes and section heads removed.
 
+## Hooks for other plugins
+
+Another plugin in the same OpenCode process can change an Anthropic request
+before it goes out and filter the response that comes back. Both plugins create
+the registry on `globalThis` with `??=`, so load order does not matter and
+nothing has to be imported:
+
+```ts
+;(globalThis as any).__claudeAccountsHooks ??= { before: [], response: [] }
+
+const hooks = (globalThis as any).__claudeAccountsHooks
+hooks.before.push((req) => {
+  req.body.metadata = { ...(req.body.metadata as object), tag: "x" } // mutate in place
+  req.headers.set(
+    "anthropic-beta",
+    req.headers.get("anthropic-beta") + ",some-beta",
+  )
+})
+hooks.response.push(async (res, ctx) => {
+  if (res.status !== 400) return res
+  return ctx.resend({ ...ctx.body, tools: [] }) // one more request, same account
+})
+```
+
+The types are exported for authors who want them: `import type { Hooks,
+HookRequest, HookContext } from "opencode-claude-accounts"` (or
+`opencode-claude-accounts/hooks`).
+
+| Hook       | Runs                                                                              | Receives                                                                                              |
+| ---------- | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `before`   | in order, after every change this plugin makes, right before each request is sent | `{ url, body, headers, model, agent?, sessionID? }`; `body` is the parsed JSON, `headers` a `Headers` |
+| `response` | in order, on the response about to be returned to OpenCode                        | `(res, ctx)`; `ctx` is the request above plus `resend(body)`                                          |
+
+- Only `POST /v1/messages` with a JSON body is touched. Everything else passes through, and with no hooks registered the request is byte-identical.
+- `before` hooks run on every outgoing attempt, so an account rotation or a retry runs them again on the body that attempt sends, once.
+- `response` hooks run once, on the response that would be returned after the plugin's own retries. They run before the plugin's own stream rewrite, so they see the upstream stream. Streaming stays streaming: return a new `Response` wrapping a `TransformStream`. Clone `res` before reading it if you return it.
+- `ctx.resend(body)` sends one more request on the same account with the same headers (mutate `ctx.headers` to change them). `before` hooks do not run for it, and a second call rejects.
+- A hook that throws is logged (`hook_failed`) and skipped: a `before` hook's body and header edits are rolled back, a `response` hook's input is passed on unchanged. A hook never fails a turn.
+- The chat span carries `hooks.before`, `hooks.response` and `hooks.errors` when any hook ran.
+
 ## Tracing (OpenTelemetry)
 
 Set `otel.endpoint` to an OTLP/HTTP collector and every model request and tool
