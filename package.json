@@ -59,6 +59,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./hooks": {
+      "types": "./dist/hooks.d.ts",
+      "import": "./dist/hooks.js"
+    },
     "./tui": "./tui/claude-auth-tui.tsx"
   },
   "publishConfig": {
