@@ -19,6 +19,7 @@
  */
 
 import { type CaptureLevel, isCaptureLevel } from "./introspect.ts"
+import type { OtelConfig } from "./otel.ts"
 import { existsSync, readFileSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
@@ -729,6 +730,11 @@ export type ClaudeAuthConfig = {
    * trimmed.
    */
   promptTrim: Record<string, string[]>
+  /**
+   * OpenTelemetry spans for model requests and tool calls, sent as OTLP/HTTP
+   * JSON to `endpoint` (e.g. http://localhost:4318). Empty endpoint: off.
+   */
+  otel: OtelConfig
   retryPrefillError: boolean
   captureRequests: CaptureLevel
   /** Named, switchable arrangements. Offered as rows in the switcher. */
@@ -791,6 +797,7 @@ export const DEFAULT_CONFIG: ClaudeAuthConfig = {
     "Here is some useful information about the environment you are running in:",
   ],
   promptTrim: {},
+  otel: { endpoint: "" },
   retryPrefillError: false,
   captureRequests: "off",
   presets: {},
@@ -1024,6 +1031,14 @@ export function sanitize(raw: unknown): Partial<ClaudeAuthConfig> {
     out.promptTrim = trim
   }
 
+  if (r.otel && typeof r.otel === "object" && !Array.isArray(r.otel)) {
+    const o = r.otel as Record<string, unknown>
+    if (typeof o.endpoint === "string") {
+      const headers = parseAccountNames(o.headers)
+      out.otel = { endpoint: o.endpoint, ...(headers ? { headers } : {}) }
+    }
+  }
+
   if (typeof r.retryPrefillError === "boolean")
     out.retryPrefillError = r.retryPrefillError
 
@@ -1175,6 +1190,13 @@ const ENV_PARSERS: Record<string, EnvParser> = {
   promptSections: (v) => {
     try {
       return sanitize({ promptSections: JSON.parse(v) }).promptSections
+    } catch {
+      return undefined
+    }
+  },
+  otel: (v) => {
+    try {
+      return sanitize({ otel: JSON.parse(v) }).otel
     } catch {
       return undefined
     }

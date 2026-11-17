@@ -960,6 +960,7 @@ true, because ten keys had previously drifted into being file-only.
 | `agentModels`          | `CLAUDE_AUTH_AGENT_MODELS` (JSON)        |
 | `promptSections`       | `CLAUDE_AUTH_PROMPT_SECTIONS` (JSON)     |
 | `promptTrim`           | `CLAUDE_AUTH_PROMPT_TRIM` (JSON)         |
+| `otel`                 | `CLAUDE_AUTH_OTEL` (JSON)                |
 | `captureRequests`      | `CLAUDE_AUTH_CAPTURE_REQUESTS`           |
 
 Names follow `camelCase` -> `CLAUDE_AUTH_SCREAMING_SNAKE`, except the six that
@@ -1106,6 +1107,38 @@ section start (the agent's own prompt) is never touched, and requests that
 carry no agent are left alone. List every block that follows a dropped one in
 `promptSections`, or it is dropped with it. Each trim is logged as
 `prompt_trimmed` with the bytes and section heads removed.
+
+## Tracing (OpenTelemetry)
+
+Set `otel.endpoint` to an OTLP/HTTP collector and every model request and tool
+call becomes a span, so a trace viewer shows where a session's time goes:
+
+```jsonc
+// ~/.config/opencode/claude-auth.jsonc
+{ "otel": { "endpoint": "http://localhost:4318" } } // optional "headers": {...}
+```
+
+All spans of one session share a trace id derived from the session id.
+
+- `chat <model>`: from the request to the end of the stream, with
+  `claude_accounts.time_to_headers_ms`, token counts (`gen_ai.usage.*`), the
+  account, the plugin's steps and the 5h/weekly utilisation it saw.
+- `tool <name>`: from OpenCode's before hook to its after hook, with
+  `mcp.server` for an MCP tool and the output size. A failed call carries the
+  error status.
+
+Every span has `session.id`, `opencode.agent`, `opencode.session.title` and
+`opencode.session.parent`. Spans never carry tool arguments, tool output or
+message text, which can hold secrets. Calls an agent makes from inside a code
+tool show as that one tool's span. Spans are posted every 2 s; with no
+collector listening they are dropped and the session is not slowed.
+
+To try it locally:
+
+```bash
+docker run -d --name jaeger -p 127.0.0.1:16686:16686 -p 127.0.0.1:4318:4318 jaegertracing/jaeger:latest
+# open http://localhost:16686, service "opencode"
+```
 
 ## Validating OAuth refresh
 
