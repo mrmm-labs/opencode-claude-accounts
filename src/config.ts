@@ -239,6 +239,7 @@ export type BalanceStrategy =
   | "least-used"
   | "random"
   | "p2c"
+  | "expiring"
 
 const STRATEGY_NAMES = new Set<string>([
   "sticky",
@@ -249,6 +250,7 @@ const STRATEGY_NAMES = new Set<string>([
   "least-used",
   "random",
   "p2c",
+  "expiring",
 ])
 
 export function isBalanceStrategy(v: unknown): v is BalanceStrategy {
@@ -713,6 +715,20 @@ export type ClaudeAuthConfig = {
    * its parent's model instead of the one the agent declares.
    */
   agentModels: Record<string, string>
+  /**
+   * Lines that start a prompt section, for `promptTrim`. OpenCode's own
+   * instruction files start with "Instructions from: "; add the first line of
+   * any block a plugin appends, so the section before it ends there.
+   */
+  promptSections: string[]
+  /**
+   * Sections to drop from the system prompt, by agent name, each a prefix of
+   * the section's first line. "*" applies to every agent without its own entry;
+   * `"build": []` exempts one. A key starting with "@" is a named list that
+   * other entries reference as "@name". Requests without an agent are never
+   * trimmed.
+   */
+  promptTrim: Record<string, string[]>
   retryPrefillError: boolean
   captureRequests: CaptureLevel
   /** Named, switchable arrangements. Offered as rows in the switcher. */
@@ -770,6 +786,11 @@ export const DEFAULT_CONFIG: ClaudeAuthConfig = {
   ejectFor: 5 * 60_000,
   accountNames: {},
   agentModels: {},
+  promptSections: [
+    "Instructions from: ",
+    "Here is some useful information about the environment you are running in:",
+  ],
+  promptTrim: {},
   retryPrefillError: false,
   captureRequests: "off",
   presets: {},
@@ -984,6 +1005,25 @@ export function sanitize(raw: unknown): Partial<ClaudeAuthConfig> {
       Object.entries(pins).map(([a, m]) => [a, m.replace(/^anthropic\//, "")]),
     )
 
+  const strings = (v: unknown): string[] | undefined =>
+    Array.isArray(v) && v.every((s) => typeof s === "string" && s.length > 0)
+      ? (v as string[])
+      : undefined
+  const sections = strings(r.promptSections)
+  if (sections) out.promptSections = sections
+  if (
+    r.promptTrim &&
+    typeof r.promptTrim === "object" &&
+    !Array.isArray(r.promptTrim)
+  ) {
+    const trim: Record<string, string[]> = {}
+    for (const [agent, v] of Object.entries(r.promptTrim)) {
+      const list = Array.isArray(v) && v.length === 0 ? [] : strings(v)
+      if (list) trim[agent] = list
+    }
+    out.promptTrim = trim
+  }
+
   if (typeof r.retryPrefillError === "boolean")
     out.retryPrefillError = r.retryPrefillError
 
@@ -1128,6 +1168,20 @@ const ENV_PARSERS: Record<string, EnvParser> = {
   agentModels: (v) => {
     try {
       return sanitize({ agentModels: JSON.parse(v) }).agentModels
+    } catch {
+      return undefined
+    }
+  },
+  promptSections: (v) => {
+    try {
+      return sanitize({ promptSections: JSON.parse(v) }).promptSections
+    } catch {
+      return undefined
+    }
+  },
+  promptTrim: (v) => {
+    try {
+      return sanitize({ promptTrim: JSON.parse(v) }).promptTrim
     } catch {
       return undefined
     }

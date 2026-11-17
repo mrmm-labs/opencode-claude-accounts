@@ -81,6 +81,8 @@ export type Health = {
   reserved?: boolean
   /** How far past the ceiling it is (margin), for ranking the emptiest reserve. */
   reservedMargin?: number
+  /** The weekly window, for `expiring`. */
+  weekly?: { utilization?: number; resetsAt?: number }
 }
 
 // ---------------------------------------------------------------------------
@@ -301,6 +303,14 @@ export function assess(
       credential,
       healthy: true,
       reason: "",
+      ...(q.sevenDay
+        ? {
+            weekly: {
+              utilization: effectiveUtilization(q.sevenDay, nowSec),
+              resetsAt: q.sevenDay.resetsAt,
+            },
+          }
+        : {}),
     }
   })
 }
@@ -627,6 +637,33 @@ const leastUsed: StrategyFn = (input) => {
   return scored[0]!.source
 }
 
+/**
+ * Weekly allowance that a reset would throw away, per hour left to spend it.
+ * Unknown weekly figures score 0, so such an account ranks last.
+ */
+export function expiringScore(h: Health, nowMs: number): number {
+  const w = h.weekly
+  if (w?.utilization === undefined || w.resetsAt === undefined) return 0
+  const hours = Math.max((w.resetsAt * 1000 - nowMs) / 3_600_000, 0.5)
+  return Math.max(1 - w.utilization, 0) / hours
+}
+
+/**
+ * Use it or lose it: the account whose unused weekly quota resets soonest,
+ * relative to how much is left. An account at 15% of its week with 11 hours
+ * to go beats one at 3% with 6 days to go. Ties fall back to `least-loaded`.
+ * Every candidate is already under `switchAt`, so the 5h window still guards.
+ */
+const expiring: StrategyFn = ({ candidates }) => {
+  const now = Date.now()
+  return [...candidates].sort(
+    (a, b) =>
+      credentialRank(a) - credentialRank(b) ||
+      expiringScore(b, now) - expiringScore(a, now) ||
+      byHeadroom(a, b),
+  )[0]!.source
+}
+
 /** Uniform choice. Cheap, stateless, and surprisingly even over many turns. */
 const random: StrategyFn = ({ candidates, rng }) =>
   candidates[
@@ -666,6 +703,7 @@ export const STRATEGIES: Record<BalanceStrategy, StrategyFn> = {
   "least-used": leastUsed,
   random,
   p2c,
+  expiring,
 }
 
 // ---------------------------------------------------------------------------

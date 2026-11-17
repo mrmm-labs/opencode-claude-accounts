@@ -144,6 +144,11 @@ rotates until you turn it on:
 | `weighted`     | by `weights`, interleaved (smooth weighted RR)   |
 | `random`       | uniform choice                                   |
 | `p2c`          | samples two at random, keeps the emptier         |
+| `expiring`     | the one whose unused weekly quota resets soonest |
+
+`expiring` spends weekly allowance that would otherwise be lost: it scores each
+account by unused weekly share per hour left before the weekly reset, so an
+account at 15% with 11 hours to go wins over one at 3% with 6 days to go.
 
 `least-loaded` reads Anthropic's view of consumption; `least-used` reads ours.
 They differ usefully: utilisation is weighted by how expensive each request was
@@ -953,6 +958,8 @@ true, because ten keys had previously drifted into being file-only.
 | `tools`                | `CLAUDE_AUTH_TOOLS`                      |
 | `contextLimit`         | `CLAUDE_AUTH_CONTEXT_LIMIT`              |
 | `agentModels`          | `CLAUDE_AUTH_AGENT_MODELS` (JSON)        |
+| `promptSections`       | `CLAUDE_AUTH_PROMPT_SECTIONS` (JSON)     |
+| `promptTrim`           | `CLAUDE_AUTH_PROMPT_TRIM` (JSON)         |
 | `captureRequests`      | `CLAUDE_AUTH_CAPTURE_REQUESTS`           |
 
 Names follow `camelCase` -> `CLAUDE_AUTH_SCREAMING_SNAKE`, except the six that
@@ -1062,6 +1069,43 @@ model, rewritten on the request that goes out, so the pin cannot be skipped:
 
 Each rewrite is logged as `agent_model_pinned`. OpenCode's own cost figures
 still use the model it chose, not the one sent.
+
+## Trimming the prompt for subagents
+
+Every agent gets the same global instructions, plus whatever blocks other
+plugins append. A subagent re-sends all of it on every request, though much of
+it is written for the person in the main session. `promptTrim` drops whole
+sections of the system prompt by agent:
+
+```jsonc
+// ~/.config/opencode/claude-auth.jsonc
+{
+  // Lines that start a section. The two defaults are OpenCode's own; add the
+  // first line of each block a plugin appends.
+  "promptSections": [
+    "Instructions from: ",
+    "Here is some useful information about the environment you are running in:",
+    "MY PLUGIN MODE ACTIVE",
+  ],
+  "promptTrim": {
+    // "@name" keys are reusable lists; reference them as "@name".
+    "@reader": ["MY PLUGIN MODE ACTIVE"],
+    "@notes": ["Instructions from: /home/me/notes/"],
+    "*": ["@reader", "@notes"],
+    "docs-writer": ["@reader"], // keeps the notes
+    "build": [], // the main agent keeps everything
+    "plan": [],
+  },
+}
+```
+
+A section runs from its first line to the line before the next section start.
+It is dropped when its first line starts with one of the agent's prefixes, or
+the `"*"` prefixes for an agent without its own entry. Text before the first
+section start (the agent's own prompt) is never touched, and requests that
+carry no agent are left alone. List every block that follows a dropped one in
+`promptSections`, or it is dropped with it. Each trim is logged as
+`prompt_trimmed` with the bytes and section heads removed.
 
 ## Validating OAuth refresh
 

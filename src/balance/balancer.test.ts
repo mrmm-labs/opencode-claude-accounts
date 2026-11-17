@@ -10,6 +10,7 @@ import {
   ejectedUntil,
   resetCursors,
   STRATEGIES,
+  expiringScore,
   resetEjections,
   orderByConfig,
   resolveAccountRefs,
@@ -1178,5 +1179,46 @@ describe("usageOf", () => {
       requests: 0,
       lastUsedAt: 0,
     })
+  })
+})
+
+describe("expiring", () => {
+  const now = Date.now()
+  const at = (hours: number) => Math.floor(now / 1000 + hours * 3600)
+  const h = (source: string, util: number | undefined, hours: number) => ({
+    source,
+    credential: "ok" as const,
+    healthy: true,
+    reason: "",
+    utilization: 0.1,
+    weekly: { utilization: util, resetsAt: at(hours) },
+  })
+  const pick = (candidates: ReturnType<typeof h>[]) =>
+    STRATEGIES.expiring({
+      candidates,
+      activeSource: null,
+      pool: { name: "p", accounts: candidates.map((c) => c.source) },
+      usage: {},
+      rng: () => 0,
+    } as never)
+
+  it("prefers the week that resets soon with quota left", () => {
+    // The sidebar case: Team 3 at 15% resets in 11h; Team 1 at 3% in 6d21h.
+    assert.equal(
+      pick([h("team1", 0.03, 165), h("team2", 0.32, 65), h("team3", 0.15, 11)]),
+      "team3",
+    )
+  })
+
+  it("does not chase a week that is already spent", () => {
+    assert.equal(pick([h("spent", 0.99, 1), h("fresh", 0.1, 48)]), "fresh")
+  })
+
+  it("ranks an account without weekly figures last", () => {
+    assert.equal(
+      pick([h("unknown", undefined, 1), h("known", 0.9, 160)]),
+      "known",
+    )
+    assert.equal(expiringScore(h("x", undefined, 1), now), 0)
   })
 })

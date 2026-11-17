@@ -501,8 +501,8 @@ describe("strategy list", () => {
     }
   })
 
-  it("covers all eight, so a silent truncation is visible", () => {
-    assert.equal(STRATEGY_NAMES.length, 8)
+  it("covers all nine, so a silent truncation is visible", () => {
+    assert.equal(STRATEGY_NAMES.length, 9)
   })
 })
 
