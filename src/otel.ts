@@ -97,6 +97,8 @@ export class Exporter {
     this.config = config
     this.post = post
     this.everyMs = everyMs
+    // A short run (`opencode run`) exits before the timer fires; send what is left.
+    process.once?.("beforeExit", () => void this.flush())
   }
 
   add(span: Span): void {
