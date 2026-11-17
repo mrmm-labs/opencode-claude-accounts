@@ -426,6 +426,8 @@ describe("config surface coverage", () => {
     weights: '{"Acme 1":3}',
     accountNames: '{"Acme 1":"Team 1"}',
     agentModels: '{"general":"claude-sonnet-5-5"}',
+    promptSections: '["Instructions from: ","MODE ACTIVE"]',
+    promptTrim: '{"*":["MODE ACTIVE"],"build":[]}',
     retryPrefillError: "1",
     captureRequests: "messages",
     useCredits: "0",

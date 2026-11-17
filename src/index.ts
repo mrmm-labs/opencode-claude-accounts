@@ -60,6 +60,7 @@ import {
 } from "./betas.ts"
 import { SYSTEM_IDENTITY, transformResponseStream } from "./transforms.ts"
 import { pinAgentModel, prepareBody } from "./request-body.ts"
+import { trimPrompt } from "./prompt-trim.ts"
 import {
   AUTO_SOURCE,
   PRESET_PREFIX,
@@ -950,6 +951,18 @@ const plugin: PluginWithOptions = async (
                 agent,
                 from: pinnedFrom,
                 to: (parsedBody as { model: string }).model,
+              })
+            }
+            const trimmed = trimPrompt(parsedBody, agent, {
+              sections: getConfig().promptSections,
+              trim: getConfig().promptTrim,
+            })
+            if (trimmed.length) {
+              steps.push("prompt-trim")
+              log("prompt_trimmed", {
+                agent,
+                bytes: trimmed.reduce((n, d) => n + d.bytes, 0),
+                sections: trimmed.map((d) => d.head),
               })
             }
             const modelId =
