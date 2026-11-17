@@ -24,7 +24,9 @@ import {
   revokeReserve,
   reserveAllowed,
   resetReserveAllows,
+  resetServedBefore,
 } from "./sessions.ts"
+import { recordRequest } from "./usage.ts"
 
 // These tests write the reserve and credit-denial files under HOME; point it
 // at a temp dir so a test run never edits the operator's real state. Each test
@@ -315,5 +317,72 @@ describe("the reserved-quota session override", () => {
     writeFileSync(p, JSON.stringify({ stale: Date.now() - 2 * 60 * 60_000 }))
     assert.equal(reserveAllowed("stale"), false)
     resetReserveAllows()
+  })
+})
+
+describe("binding across a restart", () => {
+  // The usage log is stamped with the real clock, so readings must be too.
+  const now = (u: number): AccountQuota => ({
+    ...reading(u),
+    fiveHour: {
+      utilization: u,
+      resetsAt: Math.floor(Date.now() / 1000) + 3600,
+    },
+    observedAt: Math.floor(Date.now() / 1000),
+  })
+  const served = (session: string, account: string, at: number) => {
+    resetBindings()
+    resetServedBefore()
+    recordRequest({
+      account,
+      model: "m",
+      session,
+      status: 200,
+      duration_ms: 1,
+    } as never)
+    return at
+  }
+
+  it("keeps the account that served the session before the restart", () => {
+    served("s-restart", "b", Date.now())
+    const cache: QuotaCache = { a: now(0.1), b: now(0.1) }
+    const c = cfg({ strategy: "round-robin", accounts: ["a", "b"] })
+    const d = resolveForSession(
+      "s-restart",
+      members("a", "b"),
+      cache,
+      c,
+      Date.now(),
+    )!
+    assert.equal(d.source, "b")
+    assert.equal(d.changed, false)
+    assert.match(d.reason, /before a restart/)
+  })
+
+  it("moves the session when that account is spent", () => {
+    served("s-spent", "b", Date.now())
+    const cache: QuotaCache = { a: now(0.1), b: now(1) }
+    const d = resolveForSession(
+      "s-spent",
+      members("a", "b"),
+      cache,
+      cfg(),
+      Date.now(),
+    )!
+    assert.equal(d.source, "a")
+  })
+
+  it("ignores a session last served over an hour ago", () => {
+    served("s-old", "b", Date.now())
+    const later = Date.now() + 2 * 60 * 60_000
+    const cache: QuotaCache = { a: now(0.1), b: now(0.1) }
+    const d = resolveForSession(
+      "s-old",
+      members("a", "b"),
+      cache,
+      cfg(),
+      later,
+    )!
+    assert.doesNotMatch(d.reason, /before a restart/)
   })
 })

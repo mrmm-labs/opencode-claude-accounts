@@ -30,7 +30,8 @@ import {
 } from "../credentials.ts"
 import { log } from "../logger.ts"
 import { credentialState, resolveActiveConfig } from "./rotate.ts"
-import { currentUsageIndex } from "./usage.ts"
+import { currentUsageIndex, readUsage } from "./usage.ts"
+import { accountKey } from "./account-key.ts"
 import { type Health, type Member, assess, selectAccount } from "./balancer.ts"
 import { type QuotaCache, readQuotaCache } from "./quota.ts"
 import { readJsonFresh } from "./file-memo.ts"
@@ -215,6 +216,36 @@ function sweep(nowMs: number): void {
   }
 }
 
+// Who served each session last, read once from the usage log the first time a
+// session without a binding asks. Bindings live in memory, so a restart would
+// otherwise send a running session to a new account and rewrite its whole
+// prompt cache on that account (each account has its own cache).
+let lastServed: Map<string, { account: string; at: number }> | undefined
+
+function servedBefore(
+  sessionId: string,
+  members: readonly Member[],
+  nowMs: number,
+): string | undefined {
+  if (!lastServed) {
+    lastServed = new Map()
+    for (const e of readUsage(nowMs - IDLE_MS)) {
+      if (e.kind === "request" && e.session && e.status < 400)
+        lastServed.set(e.session, { account: e.account, at: e.created_at })
+    }
+  }
+  const p = lastServed.get(sessionId)
+  if (!p || nowMs - p.at > IDLE_MS) return undefined
+  return members.find(
+    (m) => m.source === p.account || accountKey(m.source) === p.account,
+  )?.source
+}
+
+/** Tests: forget what was read from the usage log. */
+export function resetServedBefore(): void {
+  lastServed = undefined
+}
+
 export type SessionDecision = {
   source: string
   /** True when this session was not already on that account. */
@@ -249,7 +280,10 @@ export function resolveForSession(
   // A session opting IN to reserved quota widens only its own view: every other
   // session still obeys the global capMode.
   const allowReserve = reserveAllowed(sessionId)
-  const current = boundSource(sessionId)
+  const restored = boundSource(sessionId)
+    ? undefined
+    : servedBefore(sessionId, members, nowMs)
+  const current = boundSource(sessionId) ?? restored
 
   if (current) {
     const health: Health | undefined = assess(
@@ -260,7 +294,13 @@ export function resolveForSession(
     )[0]
     if (health?.healthy) {
       bindSession(sessionId, current, nowMs)
-      return { source: current, changed: false, reason: "already bound" }
+      return {
+        source: current,
+        changed: false,
+        reason: restored
+          ? "kept the account that served it before a restart"
+          : "already bound",
+      }
     }
   }
 
