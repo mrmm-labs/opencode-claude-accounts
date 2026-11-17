@@ -2,7 +2,14 @@ import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 
 import { sanitize } from "./config.ts"
-import { encode, Exporter, mcpServer, ToolTimer, traceIdFor } from "./otel.ts"
+import {
+  costUsd,
+  encode,
+  Exporter,
+  mcpServer,
+  SessionTracer,
+  traceIdFor,
+} from "./otel.ts"
 
 describe("encode", () => {
   it("gives every span of a session the same trace id and typed attributes", () => {
@@ -81,11 +88,7 @@ describe("Exporter", () => {
 })
 
 describe("tools", () => {
-  it("times a call once and names MCP servers", () => {
-    const t = new ToolTimer()
-    t.begin("c1", 5)
-    assert.equal(t.end("c1"), 5)
-    assert.equal(t.end("c1"), undefined)
+  it("names MCP servers", () => {
     assert.equal(mcpServer("bitwarden_get_password"), "bitwarden")
     assert.equal(mcpServer("mcp_github_list_issues"), "github")
     assert.equal(mcpServer("read"), undefined)
@@ -123,5 +126,98 @@ describe("exit", () => {
     hook(0)
     await new Promise((r) => setImmediate(r))
     assert.equal(posted, 1)
+  })
+})
+
+describe("SessionTracer", () => {
+  it("hangs tools under the chat that asked for them and subagents under the task call", () => {
+    const tr = new SessionTracer()
+    tr.info("child").parent = "root"
+    tr.info("root").agent = "build"
+    const rootChat = tr.chat("root")
+    assert.equal(rootChat.parentId, undefined)
+    tr.begin("call-task", "root", "task", 10)
+    const childChat = tr.chat("child")
+    const task = tr.end("call-task")!
+    assert.equal(task.parentId, rootChat.spanId)
+    assert.equal(childChat.parentId, task.spanId)
+    assert.equal(tr.root("child"), "root")
+    assert.equal(tr.service("root"), "opencode/build")
+    assert.equal(tr.service("child", "builder"), "opencode/builder")
+    assert.equal(tr.service(undefined), "opencode")
+    assert.equal(tr.end("call-task"), undefined)
+  })
+
+  it("flags a request that read under half the previous cache", () => {
+    const tr = new SessionTracer()
+    assert.equal(tr.cacheBust("s", 200_000), false)
+    assert.equal(tr.cacheBust("s", 210_000), false)
+    assert.equal(tr.cacheBust("s", 0), true)
+    assert.equal(tr.cacheBust("s", 30_000), false)
+  })
+})
+
+describe("encode by service", () => {
+  it("puts each service in its own resource and keeps parent links", () => {
+    const body = encode([
+      {
+        name: "chat m",
+        service: "opencode/build",
+        session: "s",
+        traceSession: "r",
+        spanId: "a".repeat(16),
+        start: 0,
+        end: 1,
+        attrs: {},
+      },
+      {
+        name: "anthropic.messages",
+        service: "anthropic",
+        session: "s",
+        traceSession: "r",
+        parentId: "a".repeat(16),
+        start: 0,
+        end: 1,
+        attrs: {},
+      },
+    ]) as any
+    const names = body.resourceSpans.map(
+      (r: any) => r.resource.attributes[0].value.stringValue,
+    )
+    assert.deepEqual(names, ["opencode/build", "anthropic"])
+    const child = body.resourceSpans[1].scopeSpans[0].spans[0]
+    assert.equal(child.parentSpanId, "a".repeat(16))
+    assert.equal(child.traceId, traceIdFor("r"))
+  })
+})
+
+describe("costUsd", () => {
+  it("prices by model family at list price", () => {
+    const u = {
+      input: 1_000_000,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      cacheWrite1h: 0,
+    }
+    assert.equal(costUsd("claude-opus-5-5", u), 5)
+    assert.equal(
+      costUsd("claude-sonnet-5-5", { ...u, input: 0, output: 1_000_000 }),
+      15,
+    )
+    assert.equal(
+      costUsd("claude-haiku-5-5", { ...u, input: 0, cacheRead: 1_000_000 }),
+      0.1,
+    )
+    assert.equal(
+      costUsd("claude-opus-5-5", {
+        ...u,
+        input: 0,
+        cacheWrite: 1_000_000,
+        cacheWrite1h: 1_000_000,
+      }),
+      16.25,
+    )
+    assert.equal(costUsd("gpt-x", u), undefined)
   })
 })
