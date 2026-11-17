@@ -106,3 +106,22 @@ describe("otel config", () => {
     assert.equal(sanitize({ otel: { endpoint: 4 } }).otel, undefined)
   })
 })
+
+describe("exit", () => {
+  it("flushes what is queued when the process is about to exit", async () => {
+    let posted = 0
+    const ex = new Exporter(
+      () => ({ endpoint: "http://x" }),
+      async () => void posted++,
+      60_000,
+    )
+    ex.add({ name: "x", start: 0, end: 1, attrs: {} })
+    // Call the hook it registered rather than emit beforeExit, which the test runner listens to too.
+    const hook = process.listeners("beforeExit").at(-1) as (
+      code: number,
+    ) => void
+    hook(0)
+    await new Promise((r) => setImmediate(r))
+    assert.equal(posted, 1)
+  })
+})
