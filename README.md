@@ -12,8 +12,8 @@ Taken by every release from demo accounts: one capture of the real TUI (`scripts
 
 ![The real OpenCode TUI, with a demo account](https://github.com/mrmm-labs/opencode-claude-accounts/releases/latest/download/tui.png)
 
-| Sidebar                                                                                                                                            | Forecast                                                                                            |
-| -------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Sidebar                                                                                                                                                 | Forecast                                                                                                 |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | ![Sidebar: accounts as a tree, gauges and reset countdowns](https://github.com/mrmm-labs/opencode-claude-accounts/releases/latest/download/sidebar.png) | ![Forecast](https://github.com/mrmm-labs/opencode-claude-accounts/releases/latest/download/forecast.png) |
 
 ![Account picker](https://github.com/mrmm-labs/opencode-claude-accounts/releases/latest/download/picker.png)
