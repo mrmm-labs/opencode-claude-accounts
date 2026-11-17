@@ -19,6 +19,12 @@ export type Attr = string | number | boolean | undefined
 export type Span = {
   name: string
   session?: string
+  /** service.name for this span; defaults to "opencode". */
+  service?: string
+  spanId?: string
+  parentId?: string
+  /** Session whose id seeds the trace id: the root of a subagent tree. */
+  traceSession?: string
   start: number
   end: number
   attrs: Record<string, Attr>
@@ -43,43 +49,44 @@ const value = (v: Exclude<Attr, undefined>) =>
 
 const nanos = (ms: number) => `${Math.round(ms)}000000`
 
-/** The OTLP/JSON body for a batch of spans. */
+/** The OTLP/JSON body for a batch of spans, one resource per service. */
 export function encode(spans: readonly Span[], service = "opencode"): object {
+  const byService = new Map<string, Span[]>()
+  for (const s of spans) {
+    const k = s.service ?? service
+    byService.set(k, [...(byService.get(k) ?? []), s])
+  }
   return {
-    resourceSpans: [
-      {
-        resource: {
-          attributes: [
-            { key: "service.name", value: { stringValue: service } },
-          ],
-        },
-        scopeSpans: [
-          {
-            scope: { name: "opencode-claude-accounts" },
-            spans: spans.map((s) => ({
-              traceId: traceIdFor(s.session),
-              spanId: randomBytes(8).toString("hex"),
-              name: s.name,
-              kind: 3,
-              startTimeUnixNano: nanos(s.start),
-              endTimeUnixNano: nanos(Math.max(s.end, s.start)),
-              attributes: Object.entries({
-                "session.id": s.session,
-                ...s.attrs,
-              })
-                .filter(([, v]) => v !== undefined && v !== "")
-                .map(([key, v]) => ({
-                  key,
-                  value: value(v as Exclude<Attr, undefined>),
-                })),
-              status: s.error ? { code: 2, message: s.error } : { code: 1 },
-            })),
-          },
-        ],
+    resourceSpans: [...byService].map(([name, group]) => ({
+      resource: {
+        attributes: [{ key: "service.name", value: { stringValue: name } }],
       },
-    ],
+      scopeSpans: [
+        {
+          scope: { name: "opencode-claude-accounts" },
+          spans: group.map((s) => ({
+            traceId: traceIdFor(s.traceSession ?? s.session),
+            spanId: s.spanId ?? newSpanId(),
+            ...(s.parentId ? { parentSpanId: s.parentId } : {}),
+            name: s.name,
+            kind: 3,
+            startTimeUnixNano: nanos(s.start),
+            endTimeUnixNano: nanos(Math.max(s.end, s.start)),
+            attributes: Object.entries({ "session.id": s.session, ...s.attrs })
+              .filter(([, v]) => v !== undefined && v !== "")
+              .map(([key, v]) => ({
+                key,
+                value: value(v as Exclude<Attr, undefined>),
+              })),
+            status: s.error ? { code: 2, message: s.error } : { code: 1 },
+          })),
+        },
+      ],
+    })),
   }
 }
+
+export const newSpanId = (): string => randomBytes(8).toString("hex")
 
 /** Buffers spans and posts them every few seconds; a failed post is dropped, never retried. */
 export class Exporter {
@@ -129,24 +136,124 @@ export class Exporter {
   }
 }
 
-/** Times tool calls between OpenCode's before and after hooks. */
-export class ToolTimer {
-  private started = new Map<string, number>()
+type Call = {
+  at: number
+  spanId: string
+  parentId?: string
+  session: string
+  task: boolean
+}
 
-  begin(callID: string, at = Date.now()): void {
-    this.started.set(callID, at)
-    if (this.started.size > 5000) {
+/**
+ * What links spans into one tree per session family: the chat span that asked for
+ * a tool is the tool's parent, and a subagent's chat spans hang under the parent
+ * session's open task call, in the root session's trace.
+ */
+export class SessionTracer {
+  readonly meta = new Map<
+    string,
+    { title?: string; parent?: string; agent?: string }
+  >()
+  private lastChat = new Map<string, string>()
+  private lastRead = new Map<string, number>()
+  private calls = new Map<string, Call>()
+
+  info(id: string): { title?: string; parent?: string; agent?: string } {
+    let m = this.meta.get(id)
+    if (!m) this.meta.set(id, (m = {}))
+    return m
+  }
+
+  /** The top of this session's parent chain. */
+  root(id: string): string {
+    let cur = id
+    for (let i = 0; i < 10; i++) {
+      const p = this.meta.get(cur)?.parent
+      if (!p) break
+      cur = p
+    }
+    return cur
+  }
+
+  service(id: string | undefined, agent?: string): string {
+    const a = agent ?? (id ? this.meta.get(id)?.agent : undefined)
+    return a ? `opencode/${a}` : "opencode"
+  }
+
+  /** A new chat span of this session: its id, and the span it hangs under. */
+  chat(id: string): { spanId: string; parentId?: string } {
+    const spanId = newSpanId()
+    this.lastChat.set(id, spanId)
+    const parent = this.meta.get(id)?.parent
+    let parentId: string | undefined
+    if (parent) {
+      for (const c of this.calls.values())
+        if (c.session === parent && c.task) parentId = c.spanId
+    }
+    return { spanId, ...(parentId ? { parentId } : {}) }
+  }
+
+  /** True when this request read under half of what the session's previous one did. */
+  cacheBust(id: string, cacheRead: number | undefined): boolean {
+    if (cacheRead === undefined) return false
+    const prev = this.lastRead.get(id)
+    this.lastRead.set(id, cacheRead)
+    return prev !== undefined && prev > 50_000 && cacheRead < prev / 2
+  }
+
+  begin(callID: string, session: string, tool: string, at = Date.now()): void {
+    const parentId = this.lastChat.get(session)
+    this.calls.set(callID, {
+      at,
+      spanId: newSpanId(),
+      session,
+      task: /^(task|subagent)$/i.test(tool.replace(/^mcp_/, "")),
+      ...(parentId ? { parentId } : {}),
+    })
+    if (this.calls.size > 5000) {
       // A call whose after hook never came (aborted) must not grow the map forever.
       const cut = at - 3_600_000
-      for (const [k, t] of this.started) if (t < cut) this.started.delete(k)
+      for (const [k, c] of this.calls) if (c.at < cut) this.calls.delete(k)
     }
   }
 
-  end(callID: string): number | undefined {
-    const t = this.started.get(callID)
-    this.started.delete(callID)
-    return t
+  end(callID: string): Call | undefined {
+    const c = this.calls.get(callID)
+    this.calls.delete(callID)
+    return c
   }
+}
+
+const PRICE: [RegExp, number][] = [
+  [/opus/, 5],
+  [/sonnet/, 3],
+  [/haiku/, 1],
+]
+
+/**
+ * List-price USD of one request: input $/Mtok by model family, output 5x,
+ * cache read 0.1x, cache writes 1.25x (5 min) and 2x (1 h).
+ */
+export function costUsd(
+  model: string,
+  u: {
+    input: number
+    output: number
+    cacheRead: number
+    cacheWrite: number
+    cacheWrite1h: number
+  },
+): number | undefined {
+  const p = PRICE.find(([re]) => re.test(model))?.[1]
+  if (p === undefined) return undefined
+  return (
+    (u.input * p +
+      u.output * 5 * p +
+      u.cacheRead * 0.1 * p +
+      u.cacheWrite * 1.25 * p +
+      u.cacheWrite1h * 2 * p) /
+    1e6
+  )
 }
 
 const BUILTIN = new Set([

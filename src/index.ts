@@ -61,23 +61,21 @@ import {
 import { SYSTEM_IDENTITY, transformResponseStream } from "./transforms.ts"
 import { pinAgentModel, prepareBody } from "./request-body.ts"
 import { trimPrompt } from "./prompt-trim.ts"
-import { Exporter, mcpServer, ToolTimer } from "./otel.ts"
+import {
+  costUsd,
+  Exporter,
+  mcpServer,
+  newSpanId,
+  SessionTracer,
+} from "./otel.ts"
 
 // Tracing state. Session metadata comes from OpenCode's events and chat hooks;
 // the exporter is a no-op until `otel.endpoint` is set.
 const otel = new Exporter(() => getConfig().otel)
-const toolTimer = new ToolTimer()
-const sessionMeta = new Map<
-  string,
-  { title?: string; parent?: string; agent?: string }
->()
-const meta = (id: string) => {
-  let m = sessionMeta.get(id)
-  if (!m) sessionMeta.set(id, (m = {}))
-  return m
-}
+const tracer = new SessionTracer()
+const meta = (id: string) => tracer.info(id)
 const sessionAttrs = (id: string | undefined) => {
-  const m = id ? sessionMeta.get(id) : undefined
+  const m = id ? tracer.meta.get(id) : undefined
   return {
     "opencode.session.title": m?.title,
     "opencode.session.parent": m?.parent,
@@ -835,18 +833,23 @@ const plugin: PluginWithOptions = async (
     },
 
     "tool.execute.before": async (input) => {
-      toolTimer.begin(input.callID)
+      tracer.begin(input.callID, input.sessionID, input.tool)
     },
 
     "tool.execute.after": async (input, output) => {
-      const start = toolTimer.end(input.callID)
-      if (start === undefined) return
+      const call = tracer.end(input.callID)
+      if (!call) return
+      const start = call.at
       const server = mcpServer(input.tool)
       const failed = (output?.metadata as { error?: unknown } | undefined)
         ?.error
       otel.add({
         name: `tool ${input.tool}`,
         session: input.sessionID,
+        traceSession: tracer.root(input.sessionID),
+        service: server ? `mcp/${server}` : tracer.service(input.sessionID),
+        spanId: call.spanId,
+        ...(call.parentId ? { parentId: call.parentId } : {}),
         start,
         end: Date.now(),
         ...(failed ? { error: String(failed).slice(0, 120) } : {}),
@@ -942,6 +945,7 @@ const plugin: PluginWithOptions = async (
           apiKey: "",
           baseURL: "https://api.anthropic.com/v1",
           async fetch(input: RequestInfo | URL, init?: RequestInit) {
+            const enteredAt = Date.now()
             // Which session is this? Per-session binding lets parallel
             // subagents — each its own session — run on different accounts
             // instead of queueing on one. Resolved per request against that
@@ -1486,11 +1490,37 @@ const plugin: PluginWithOptions = async (
               if (!servedBy || recorded) return
               recorded = true
               const account = accountKey(servedBy)
+              const sid = ocSessionId ?? undefined
+              const link = sid ? tracer.chat(sid) : { spanId: newSpanId() }
+              const traceSession = sid ? tracer.root(sid) : undefined
+              const endedAt = Date.now()
+              const failed =
+                response.status >= 400
+                  ? { error: `HTTP ${response.status}` }
+                  : {}
+              otel.add({
+                name: "anthropic.messages",
+                session: sid,
+                traceSession,
+                service: "anthropic",
+                parentId: link.spanId,
+                start: startedAt,
+                end: endedAt,
+                ...failed,
+                attrs: {
+                  "gen_ai.request.model": modelId,
+                  "http.response.status_code": response.status,
+                  "claude_accounts.account": account,
+                },
+              })
               otel.add({
                 name: `chat ${modelId}`,
-                session: ocSessionId ?? undefined,
-                start: startedAt,
-                end: Date.now(),
+                session: sid,
+                traceSession,
+                service: tracer.service(sid, agent ?? undefined),
+                ...link,
+                start: enteredAt,
+                end: endedAt,
                 ...(response.status >= 400
                   ? { error: `HTTP ${response.status}` }
                   : {}),
@@ -1511,6 +1541,14 @@ const plugin: PluginWithOptions = async (
                   "claude_accounts.account": account,
                   "claude_accounts.steps": steps.join(","),
                   "claude_accounts.time_to_headers_ms": headersAt - startedAt,
+                  // Plugin work before the request left: account choice, body rewrite, refresh.
+                  "claude_accounts.plugin_overhead_ms": startedAt - enteredAt,
+                  "claude_accounts.cost_usd": usage
+                    ? costUsd(modelId, usage)
+                    : undefined,
+                  "claude_accounts.cache_bust": sid
+                    ? tracer.cacheBust(sid, usage?.cacheRead)
+                    : undefined,
                   "claude_accounts.utilization_5h": u5,
                   "claude_accounts.utilization_7d": u7,
                 },

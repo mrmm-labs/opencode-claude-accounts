@@ -213,10 +213,10 @@ export async function setup(ctx: Context, v1: V1Plugin) {
   const onEvent = hooks.event
   const described = new Set<string>()
   // V2 has no session event for plugins here; ask once per session instead.
-  const describe = (sessionID: string) => {
+  const describe = (sessionID: string): Promise<unknown> | undefined => {
     if (!onEvent || described.has(sessionID)) return
     described.add(sessionID)
-    ctx.session
+    return ctx.session
       .get({ sessionID } as never)
       .then((info: { title?: string; parentID?: string }) =>
         onEvent({
@@ -238,7 +238,10 @@ export async function setup(ctx: Context, v1: V1Plugin) {
     await ctx.session.hook(
       "model.request",
       async (event) => {
-        describe(event.sessionID)
+        // Wait briefly so a subagent's first span already knows its parent.
+        const known = describe(event.sessionID)
+        if (known)
+          await Promise.race([known, new Promise((r) => setTimeout(r, 500))])
         await chatHeaders(
           {
             sessionID: event.sessionID,

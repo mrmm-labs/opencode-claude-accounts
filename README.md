@@ -1118,11 +1118,20 @@ call becomes a span, so a trace viewer shows where a session's time goes:
 { "otel": { "endpoint": "http://localhost:4318" } } // optional "headers": {...}
 ```
 
-All spans of one session share a trace id derived from the session id.
+A session and its subagents share one trace, keyed on the root session id.
+Spans are split into services so a dependency graph (Jaeger "System
+Architecture") shows who calls whom: `opencode/<agent>` for chat and built-in
+tool spans, `anthropic` for the API call under each chat span, and
+`mcp/<server>` for MCP tool calls. A tool span's parent is the chat span that
+asked for it; a subagent's chat spans hang under the parent session's `task`
+call.
 
 - `chat <model>`: from the request to the end of the stream, with
   `claude_accounts.time_to_headers_ms`, token counts (`gen_ai.usage.*`), the
-  account, the plugin's steps and the 5h/weekly utilisation it saw.
+  account, the plugin's steps and the 5h/weekly utilisation it saw, the list-price
+  cost (`claude_accounts.cost_usd`), the plugin's own time before the request left
+  (`claude_accounts.plugin_overhead_ms`) and `claude_accounts.cache_bust` (read
+  under half of the session's previous request).
 - `tool <name>`: from OpenCode's before hook to its after hook, with
   `mcp.server` for an MCP tool and the output size. A failed call carries the
   error status.
