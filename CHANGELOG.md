@@ -35,6 +35,13 @@ Design decisions behind these changes are in [docs/adr](docs/adr/README.md); the
 * quota and reserve files are re-read only when they change; the usage index refresh went from about 10 ms to 0.3 ms
 * account profiles are fetched in parallel at start-up
 
+## [3.1.2](https://github.com/mrmm-labs/opencode-claude-accounts/compare/v3.1.1...v3.1.2) (2026-11-18)
+
+
+### Bug Fixes
+
+* rescan the Keychain list at most every 5 minutes ([#25](https://github.com/mrmm-labs/opencode-claude-accounts/issues/25)) ([96ef569](https://github.com/mrmm-labs/opencode-claude-accounts/commit/96ef56945e2f10f671bf211f7dc3eb766e3ee3c0))
+
 ## [3.1.1](https://github.com/mrmm-labs/opencode-claude-accounts/compare/v3.1.0...v3.1.1) (2026-11-18)
 
 
