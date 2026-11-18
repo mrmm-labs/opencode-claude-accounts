@@ -72,6 +72,8 @@ async function loadCredentialsWithCountingKeychain(
     __setReadHook: (hook: (() => void) | null) => void
   }
 }> {
+  // Each load is a fresh plugin copy; the Keychain scan cache is process-wide.
+  delete (globalThis as Record<string, unknown>).__claudeAccountsKeychainScan
   const tempDir = await mkdtemp(join(tmpdir(), "opencode-claude-auth-creds-"))
   await copySiblingModules(tempDir)
   const tempKeychain = join(tempDir, "keychain.ts")
@@ -600,6 +602,27 @@ describe("credential caching", () => {
     } finally {
       Date.now = originalNow
     }
+  })
+
+  it("plugin copies in one process share the Keychain scan", async () => {
+    const now = Date.now()
+    const first = await loadCredentialsWithCountingKeychain(now + 10 * 60_000)
+    first.credentialsModule.refreshAccountsList()
+    const reads = first.keychainModule.__getReadCount()
+    // A second copy loads with its own module state, as one per project does on the server.
+    const shared = (globalThis as Record<string, unknown>)
+      .__claudeAccountsKeychainScan
+    const second = await loadCredentialsWithCountingKeychain(now + 10 * 60_000)
+    ;(globalThis as Record<string, unknown>).__claudeAccountsKeychainScan =
+      shared
+    const list = second.credentialsModule.refreshAccountsList()
+    assert.equal(list.length, 1)
+    assert.equal(
+      second.keychainModule.__getReadCount(),
+      0,
+      "second copy reuses the scan",
+    )
+    assert.equal(first.keychainModule.__getReadCount(), reads)
   })
 
   it("refreshAccountsList keeps existing accounts when the source reads empty", async () => {
