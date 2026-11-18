@@ -35,6 +35,32 @@ Design decisions behind these changes are in [docs/adr](docs/adr/README.md); the
 * quota and reserve files are re-read only when they change; the usage index refresh went from about 10 ms to 0.3 ms
 * account profiles are fetched in parallel at start-up
 
+## [3.1.0](https://github.com/mrmm-labs/opencode-claude-accounts/compare/v3.0.0...v3.1.0) (2026-11-18)
+
+
+### Features
+
+* agentModels pins each agent to a model on the wire ([#14](https://github.com/mrmm-labs/opencode-claude-accounts/issues/14)) ([b5b52b1](https://github.com/mrmm-labs/opencode-claude-accounts/commit/b5b52b19b7f51434938e32dcc1b03616a19ae857))
+* OpenTelemetry spans for model requests and tool calls ([#16](https://github.com/mrmm-labs/opencode-claude-accounts/issues/16)) ([32e5eac](https://github.com/mrmm-labs/opencode-claude-accounts/commit/32e5eac052c5bae41662fdc97cd9c44e3374435a))
+* promptTrim per agent and an expiring strategy ([#15](https://github.com/mrmm-labs/opencode-claude-accounts/issues/15)) ([7b1e2b1](https://github.com/mrmm-labs/opencode-claude-accounts/commit/7b1e2b10b88458ed423a74173866055a598671e0))
+* request and response hooks for other plugins ([#21](https://github.com/mrmm-labs/opencode-claude-accounts/issues/21)) ([388fd1e](https://github.com/mrmm-labs/opencode-claude-accounts/commit/388fd1ea244e5d5da384b7c25507dcd68ff725e0))
+* split spans into services with parent links, cost and cache-bust labels ([#20](https://github.com/mrmm-labs/opencode-claude-accounts/issues/20)) ([884151d](https://github.com/mrmm-labs/opencode-claude-accounts/commit/884151df1163050dadc3c8c093d48b829ba15c3d))
+
+
+### Bug Fixes
+
+* keep a session on its account across a restart ([#19](https://github.com/mrmm-labs/opencode-claude-accounts/issues/19)) ([27f95c0](https://github.com/mrmm-labs/opencode-claude-accounts/commit/27f95c0eed7e1ed3e890ea6bc3ce31324134fd1f))
+* rescan the Keychain at most every 30 s instead of on every account-list read ([#22](https://github.com/mrmm-labs/opencode-claude-accounts/issues/22)) ([e0768b2](https://github.com/mrmm-labs/opencode-claude-accounts/commit/e0768b22874c27302b49060cb1725da843795968))
+* send queued spans before a short run exits ([#17](https://github.com/mrmm-labs/opencode-claude-accounts/issues/17)) ([9a17852](https://github.com/mrmm-labs/opencode-claude-accounts/commit/9a178525527b9756eb91bb366572239b72c054a9))
+* **tui:** cap account names so the gauges stay in the sidebar ([8fd1316](https://github.com/mrmm-labs/opencode-claude-accounts/commit/8fd13167df7b6a5619e61014f19ea886ddfb5919))
+* **tui:** start each countdown at its gauge's column ([#10](https://github.com/mrmm-labs/opencode-claude-accounts/issues/10)) ([7f5d137](https://github.com/mrmm-labs/opencode-claude-accounts/commit/7f5d137e09dd9d96d9f96bfdce789a869ec1e98b))
+* **tui:** tree layout that fits the sidebar ([34ebf0c](https://github.com/mrmm-labs/opencode-claude-accounts/commit/34ebf0c20c37c6fe9850d65c8df0cd1d44d21f42))
+
+
+### Performance Improvements
+
+* faster sidebar refresh, one probe per account across processes ([#7](https://github.com/mrmm-labs/opencode-claude-accounts/issues/7)) ([3853981](https://github.com/mrmm-labs/opencode-claude-accounts/commit/3853981fe90d329fbe0841c7b7b918079e908f9f))
+
 ## [3.0.0](https://github.com/mrmm/opencode-claude-accounts/compare/v2.1.4...v3.0.0) (2026-11-12)
 
 
