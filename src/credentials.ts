@@ -105,7 +105,7 @@ function callerFrames(): string {
   }
 }
 
-/** `force` rescans now; the account switcher uses it to show accounts added a moment ago. */
+/** `force` rescans now, whatever the cache holds. */
 export function refreshAccountsList(force = false): ClaudeAccount[] {
   const scan = sharedScan()
   if (
