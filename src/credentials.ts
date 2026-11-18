@@ -39,9 +39,10 @@ let allAccounts: ClaudeAccount[] = []
 // A Keychain rescan runs `security` synchronously once per account (8 processes for 7
 // accounts), blocking the event loop each time; callers on timers and status lines hit it
 // dozens of times a minute. Refreshes update the listed account objects in place, so a
-// recent list stays current. The server loads one plugin copy per project, so the scan is
-// shared through globalThis: every copy reuses one list instead of rescanning on its own.
-const ACCOUNTS_LIST_TTL_MS = 30_000
+// recent list stays current; the list only goes stale when an account is added or removed.
+// The scan is shared through globalThis where copies share one; OpenCode 2 isolates each
+// per-project copy, so the TTL is what bounds the total there.
+const ACCOUNTS_LIST_TTL_MS = 5 * 60_000
 const SCAN_KEY = "__claudeAccountsKeychainScan"
 type Scan = { at: number; list: ClaudeAccount[] }
 const sharedScan = (): Scan =>

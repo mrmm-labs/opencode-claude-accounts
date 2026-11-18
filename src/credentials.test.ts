@@ -580,7 +580,7 @@ describe("credential caching", () => {
     }
   })
 
-  it("refreshAccountsList rescans the Keychain at most every 30 s unless forced", async () => {
+  it("refreshAccountsList rescans the Keychain at most every 5 min unless forced", async () => {
     const now = Date.now()
     const { credentialsModule, keychainModule } =
       await loadCredentialsWithCountingKeychain(now + 10 * 60_000)
@@ -589,15 +589,19 @@ describe("credential caching", () => {
       credentialsModule.refreshAccountsList()
       const reads = keychainModule.__getReadCount()
       credentialsModule.refreshAccountsList()
-      assert.equal(keychainModule.__getReadCount(), reads, "cached within 30 s")
+      assert.equal(
+        keychainModule.__getReadCount(),
+        reads,
+        "cached within 5 min",
+      )
       credentialsModule.refreshAccountsList(true)
       assert.equal(keychainModule.__getReadCount(), reads + 1, "force rescans")
-      Date.now = () => originalNow() + 31_000
+      Date.now = () => originalNow() + 5 * 60_000 + 1_000
       credentialsModule.refreshAccountsList()
       assert.equal(
         keychainModule.__getReadCount(),
         reads + 2,
-        "rescans after 30 s",
+        "rescans after 5 min",
       )
     } finally {
       Date.now = originalNow
