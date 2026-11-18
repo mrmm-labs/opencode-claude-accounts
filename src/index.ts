@@ -1715,7 +1715,7 @@ const plugin: PluginWithOptions = async (
           label: "Switch Claude Code account",
 
           get prompts() {
-            const currentAccounts = refreshAccountsList()
+            const currentAccounts = refreshAccountsList(true)
             const currentSource =
               loadPersistedAccountSource() ?? defaultAccountSource
             // Count what can actually serve. Five entries of which four are

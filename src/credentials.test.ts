@@ -57,7 +57,7 @@ async function loadCredentialsWithCountingKeychain(
     }) => Creds | null
     initAccounts: (accounts: unknown[]) => void
     invalidateCredentialCache: () => void
-    refreshAccountsList: () => unknown[]
+    refreshAccountsList: (force?: boolean) => unknown[]
     reloadActiveAccount: () => void
     forceRefreshActiveAccount: (
       refresh?: (refreshToken: string) => Creds | null,
@@ -193,7 +193,7 @@ export function __setAccounts(list) {
       }) => Creds | null
       initAccounts: (accounts: unknown[]) => void
       invalidateCredentialCache: () => void
-      refreshAccountsList: () => unknown[]
+      refreshAccountsList: (force?: boolean) => unknown[]
       reloadActiveAccount: () => void
       forceRefreshActiveAccount: (
         refresh?: (refreshToken: string) => Creds | null,
@@ -572,6 +572,30 @@ describe("credential caching", () => {
         account.credentials.accessToken,
         "new-token",
         "account.credentials should be updated in place so future calls see the new tokens",
+      )
+    } finally {
+      Date.now = originalNow
+    }
+  })
+
+  it("refreshAccountsList rescans the Keychain at most every 30 s unless forced", async () => {
+    const now = Date.now()
+    const { credentialsModule, keychainModule } =
+      await loadCredentialsWithCountingKeychain(now + 10 * 60_000)
+    const originalNow = Date.now
+    try {
+      credentialsModule.refreshAccountsList()
+      const reads = keychainModule.__getReadCount()
+      credentialsModule.refreshAccountsList()
+      assert.equal(keychainModule.__getReadCount(), reads, "cached within 30 s")
+      credentialsModule.refreshAccountsList(true)
+      assert.equal(keychainModule.__getReadCount(), reads + 1, "force rescans")
+      Date.now = () => originalNow() + 31_000
+      credentialsModule.refreshAccountsList()
+      assert.equal(
+        keychainModule.__getReadCount(),
+        reads + 2,
+        "rescans after 30 s",
       )
     } finally {
       Date.now = originalNow
