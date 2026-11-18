@@ -86,8 +86,23 @@ function callerFrames(): string {
   }
 }
 
-export function refreshAccountsList(): ClaudeAccount[] {
+// A Keychain rescan runs `security` synchronously once per account (8 processes for 7
+// accounts), blocking the event loop each time; callers on timers and status lines hit it
+// dozens of times a minute. Refreshes update the listed account objects in place, so a
+// recent list stays current.
+const ACCOUNTS_LIST_TTL_MS = 30_000
+let accountsListedAt = 0
+
+/** `force` rescans now; the account switcher uses it to show accounts added a moment ago. */
+export function refreshAccountsList(force = false): ClaudeAccount[] {
+  if (
+    !force &&
+    allAccounts.length > 0 &&
+    Date.now() - accountsListedAt < ACCOUNTS_LIST_TTL_MS
+  )
+    return allAccounts
   const fresh = readAllClaudeAccounts()
+  accountsListedAt = Date.now()
   if (fresh.length === 0 && allAccounts.length > 0) {
     // Transient empty read (e.g. keychain race while the claude CLI rewrites
     // credentials) must not clobber a working session.
