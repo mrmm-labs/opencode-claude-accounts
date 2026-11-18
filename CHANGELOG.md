@@ -35,6 +35,13 @@ Design decisions behind these changes are in [docs/adr](docs/adr/README.md); the
 * quota and reserve files are re-read only when they change; the usage index refresh went from about 10 ms to 0.3 ms
 * account profiles are fetched in parallel at start-up
 
+## [3.1.3](https://github.com/mrmm-labs/opencode-claude-accounts/compare/v3.1.2...v3.1.3) (2026-11-18)
+
+
+### Bug Fixes
+
+* the switcher prompt list reads the cached account list ([#27](https://github.com/mrmm-labs/opencode-claude-accounts/issues/27)) ([b8d9ede](https://github.com/mrmm-labs/opencode-claude-accounts/commit/b8d9edec74253724d63b56d855978dbf655a9f9b))
+
 ## [3.1.2](https://github.com/mrmm-labs/opencode-claude-accounts/compare/v3.1.1...v3.1.2) (2026-11-18)
 
 
