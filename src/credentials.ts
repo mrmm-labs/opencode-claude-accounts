@@ -36,8 +36,26 @@ const accountCacheMap = new Map<
 let activeAccountSource: string | null = null
 let allAccounts: ClaudeAccount[] = []
 
+// A Keychain rescan runs `security` synchronously once per account (8 processes for 7
+// accounts), blocking the event loop each time; callers on timers and status lines hit it
+// dozens of times a minute. Refreshes update the listed account objects in place, so a
+// recent list stays current. The server loads one plugin copy per project, so the scan is
+// shared through globalThis: every copy reuses one list instead of rescanning on its own.
+const ACCOUNTS_LIST_TTL_MS = 30_000
+const SCAN_KEY = "__claudeAccountsKeychainScan"
+type Scan = { at: number; list: ClaudeAccount[] }
+const sharedScan = (): Scan =>
+  ((globalThis as Record<string, unknown>)[SCAN_KEY] ??= {
+    at: 0,
+    list: [],
+  }) as Scan
+
 export function initAccounts(accounts: ClaudeAccount[]): void {
   allAccounts = accounts
+  // The caller just scanned; later copies and reads reuse it.
+  const scan = sharedScan()
+  scan.list = accounts
+  scan.at = Date.now()
 }
 
 export function setActiveAccountSource(source: string): void {
@@ -86,29 +104,27 @@ function callerFrames(): string {
   }
 }
 
-// A Keychain rescan runs `security` synchronously once per account (8 processes for 7
-// accounts), blocking the event loop each time; callers on timers and status lines hit it
-// dozens of times a minute. Refreshes update the listed account objects in place, so a
-// recent list stays current.
-const ACCOUNTS_LIST_TTL_MS = 30_000
-let accountsListedAt = 0
-
 /** `force` rescans now; the account switcher uses it to show accounts added a moment ago. */
 export function refreshAccountsList(force = false): ClaudeAccount[] {
+  const scan = sharedScan()
   if (
     !force &&
-    allAccounts.length > 0 &&
-    Date.now() - accountsListedAt < ACCOUNTS_LIST_TTL_MS
-  )
+    scan.list.length > 0 &&
+    Date.now() - scan.at < ACCOUNTS_LIST_TTL_MS
+  ) {
+    allAccounts = scan.list
     return allAccounts
+  }
   const fresh = readAllClaudeAccounts()
-  accountsListedAt = Date.now()
+  scan.at = Date.now()
   if (fresh.length === 0 && allAccounts.length > 0) {
     // Transient empty read (e.g. keychain race while the claude CLI rewrites
     // credentials) must not clobber a working session.
     log("accounts_reload_empty", { keptAccounts: allAccounts.length })
+    scan.list = allAccounts
     return allAccounts
   }
+  scan.list = fresh
   allAccounts = fresh
   return allAccounts
 }
