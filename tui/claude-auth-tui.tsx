@@ -26,6 +26,7 @@ import type {
   TuiPluginModule,
 } from "@opencode-ai/plugin/tui"
 import { createSignal, For, onCleanup, Show } from "solid-js"
+import { Worker } from "node:worker_threads"
 import { setupV2 } from "./v2-adapter.tsx"
 import {
   closeSync,
@@ -173,7 +174,6 @@ import {
   sessionTotals,
   chartRows,
   contextSeries,
-  dailySeries,
   type Row,
   type ShapeLike,
   type WorkReport,
@@ -187,7 +187,6 @@ import {
   trafficRows,
 } from "../dist/tui/traffic.js"
 import { capturePath } from "../dist/introspect.js"
-import { readStore } from "../dist/tui/store.js"
 import { spawnSync } from "node:child_process"
 import { scanSetup, type SetupScan } from "../dist/tui/setup.js"
 import { homedir } from "node:os"
@@ -591,43 +590,36 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
     daily?: number[]
     error?: string
   }
-  const readGlobal = async (): Promise<Global> => {
-    try {
-      const { Database } = (await import("bun:sqlite" as string)) as {
-        Database: new (
-          p: string,
-          o: { readonly: boolean },
-        ) => {
-          query: (sql: string) => { all: (...a: unknown[]) => unknown[] }
-          close: () => void
-        }
+  // The scan takes seconds on a large store and bun:sqlite blocks its thread, so it runs in
+  // a worker; a worker that cannot start or answer reports an error instead of freezing.
+  const readGlobal = (): Promise<Global> =>
+    new Promise((resolve) => {
+      const done = (g: Global) => {
+        clearTimeout(limit)
+        void worker?.terminate()
+        resolve(g)
       }
-      const db = new Database(dbPath, { readonly: true })
+      const fail = (e: unknown) =>
+        done({
+          error:
+            "store unreadable: " +
+            String((e as Error)?.message ?? e).slice(0, 40),
+        })
+      let worker: Worker | undefined
+      const limit = setTimeout(() => fail("scan timed out"), 120_000)
       try {
-        // Every session and tool call OpenCode recorded: the traffic is already on disk.
-        const { sessions: rows, calls } = readStore(
-          (sql, since) => db.query(sql).all(since),
-          Date.now() - 7 * 86_400_000,
+        worker = new Worker(
+          new URL("../dist/tui/global-scan.js", import.meta.url),
+          { workerData: { dbPath, now: Date.now() } },
         )
-        return {
-          totals: globalTotals(rows),
-          tools: traffic(calls),
-          daily: dailySeries(
-            rows as unknown as Parameters<typeof dailySeries>[0],
-            Date.now(),
-          ),
-        }
-      } finally {
-        db.close()
+        worker.once("message", (m: Global) =>
+          m.error ? fail(m.error) : done(m),
+        )
+        worker.once("error", fail)
+      } catch (e) {
+        fail(e)
       }
-    } catch (e) {
-      return {
-        error:
-          "store unreadable: " +
-          String((e as Error)?.message ?? e).slice(0, 40),
-      }
-    }
-  }
+    })
   // The newest captured request: the only place the prompt's composition exists. Read
   // from the file's tail so an 8 MB capture is not parsed every minute.
   const readComposition = (): Map<string, ShapeLike> | string => {
