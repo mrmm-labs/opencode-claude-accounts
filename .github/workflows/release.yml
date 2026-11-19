@@ -80,8 +80,8 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish "${{ steps.pack.outputs.file }}" --provenance --access public
 
-  # Every release carries a PNG per feature; its notes show only the features
-  # whose files changed since the previous tag. Rendered from demo accounts.
+  # A release carries PNGs only for the features whose files changed since the
+  # previous tag, and none when nothing visible changed. Rendered from demo accounts.
   screenshots:
     needs: release-please
     if: needs.release-please.outputs.created == 'true' || github.event_name == 'workflow_dispatch'
@@ -108,16 +108,30 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: sudo apt-get install -y --no-install-recommends librsvg2-bin fonts-dejavu-core
+      # Only features whose files changed since the previous tag get a screenshot.
+      - name: Changed features
+        id: changed
+        run: |
+          prev=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || true)
+          if [ -n "$prev" ]; then git diff --name-only "$prev" "$TAG"; else git ls-files; fi > changed.txt
+          ids=$(node --experimental-strip-types scripts/screenshots.ts features < changed.txt | tr '\n' ' ')
+          echo "ids=$ids" >> "$GITHUB_OUTPUT"
+          echo "changed features: ${ids:-none}"
+
+      - if: steps.changed.outputs.ids != ''
+        run: sudo apt-get install -y --no-install-recommends librsvg2-bin fonts-dejavu-core
 
       - name: Render
+        if: steps.changed.outputs.ids != ''
         run: |
-          node --experimental-strip-types scripts/screenshots.ts render shots
-          for f in shots/*.svg; do rsvg-convert -z 2 "$f" -o "${f%.svg}.png"; done
+          mkdir -p shots
+          node --experimental-strip-types scripts/screenshots.ts render shots ${{ steps.changed.outputs.ids }}
+          for f in shots/*.svg; do [ -e "$f" ] && rsvg-convert -z 2 "$f" -o "${f%.svg}.png"; done; true
 
       # The real TUI, through VHS. Never blocks a release: without it the notes
       # just leave the capture out.
       - name: Capture the real TUI
+        if: contains(format(' {0} ', steps.changed.outputs.ids), ' tui ')
         continue-on-error: true
         timeout-minutes: 8
         env:
@@ -157,10 +171,10 @@ jobs:
           [ -s shots/tui.png ]
 
       - name: Attach and feature in the notes
+        if: steps.changed.outputs.ids != ''
         run: |
+          ls shots/*.png >/dev/null 2>&1 || exit 0
           gh release upload "$TAG" shots/*.png --clobber
-          prev=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || true)
-          if [ -n "$prev" ]; then git diff --name-only "$prev" "$TAG"; else git ls-files; fi > changed.txt
           node --experimental-strip-types scripts/screenshots.ts notes "$GITHUB_REPOSITORY" "$TAG" shots < changed.txt > shots.md
           [ -s shots.md ] || exit 0
           gh release view "$TAG" --json body -q .body > notes.md

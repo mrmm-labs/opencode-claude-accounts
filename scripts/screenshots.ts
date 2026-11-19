@@ -1,7 +1,9 @@
 /**
  * Release screenshots, rendered from demo accounts.
  *
- *   node --experimental-strip-types scripts/screenshots.ts render <dir>
+ *   node --experimental-strip-types scripts/screenshots.ts render <dir> [id...]
+ *   git diff --name-only <prev> <tag> |
+ *     node --experimental-strip-types scripts/screenshots.ts features
  *   git diff --name-only <prev> <tag> |
  *     node --experimental-strip-types scripts/screenshots.ts notes <repo> <tag> [dir]
  *
@@ -58,22 +60,17 @@ export const FEATURES: Feature[] = [
   {
     id: "sidebar",
     title: "Sidebar: accounts as a tree, gauges and reset countdowns",
-    files: [
-      "tui/claude-auth-tui.tsx",
-      "src/tui/chip.ts",
-      "src/tui/groups.ts",
-      "src/balance/quota.ts",
-    ],
+    files: ["src/tui/chip.ts", "src/tui/groups.ts", "src/balance/quota.ts"],
   },
   {
     id: "forecast",
     title: "Forecast: does the pool last until it refills?",
-    files: ["src/tui/forecast.ts", "tui/claude-auth-tui.tsx"],
+    files: ["src/tui/forecast.ts"],
   },
   {
     id: "picker",
     title: "Account picker",
-    files: ["src/tui/chip.ts", "tui/claude-auth-tui.tsx"],
+    files: ["src/tui/chip.ts"],
   },
   {
     id: "status",
@@ -414,9 +411,14 @@ export function releaseNotes(
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const [cmd, a, b, dir] = process.argv.slice(2)
   if (cmd === "render" && a) {
+    const only = process.argv.slice(4)
     mkdirSync(a, { recursive: true })
     for (const [id, scene] of Object.entries(SCENES))
-      writeFileSync(join(a, `${id}.svg`), renderSvg(scene()))
+      if (only.length === 0 || only.includes(id))
+        writeFileSync(join(a, `${id}.svg`), renderSvg(scene()))
+  } else if (cmd === "features") {
+    const paths = readFileSync(0, "utf8").split("\n")
+    for (const f of changedFeatures(paths)) process.stdout.write(`${f.id}\n`)
   } else if (cmd === "notes" && a && b) {
     const paths = readFileSync(0, "utf8").split("\n")
     const shown = changedFeatures(paths).filter(
@@ -425,7 +427,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.stdout.write(releaseNotes(shown, a, b))
   } else {
     console.error(
-      "usage: screenshots.ts render <dir> | notes <repo> <tag> [dir]",
+      "usage: screenshots.ts render <dir> [id...] | features | notes <repo> <tag> [dir]",
     )
     process.exit(2)
   }
