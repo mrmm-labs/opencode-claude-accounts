@@ -116,6 +116,7 @@ import {
   toastResult,
   toCacheRows,
   type RequestLike,
+  type ShapeLike as CacheShape,
 } from "../dist/tui/caps-ui.js"
 import {
   applyMigration,
@@ -1836,9 +1837,17 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
           // The request log carries the token counts the quota cache cannot:
           // reads, writes and uncached input per request. cacheViewRows totals
           // them per account and per session and labels each miss by cause.
-          const requests = requestsFromUsage(
-            readUsage(Date.now() - 24 * 60 * 60_000),
-          )
+          const since = Date.now() - 24 * 60 * 60_000
+          const requests = requestsFromUsage(readUsage(since))
+          // Empty unless captureRequests is on; then misses get real causes.
+          let shapes: CacheShape[] = []
+          try {
+            shapes = readShapeFile().filter(
+              (s: CacheShape) => s.created_at >= since,
+            )
+          } catch {
+            shapes = []
+          }
           const editSetting = (key: string) => {
             const meta = EDITABLE.find((e) => e.key === key)
             if (!meta) return
@@ -1857,11 +1866,9 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
               />
             ))
           }
-          // The shape log carries no prefix hashes today, so the join is a no-op
-          // and classification falls back to account/model/TTL signals.
           const showView = () => {
             const impact = optimizationRows(
-              cacheImpact(toCacheRows(requests)),
+              cacheImpact(toCacheRows(requests, shapes)),
               getConfig() as unknown as Record<string, unknown>,
             ).map((r, j) => ({
               title: r.label,
@@ -1870,7 +1877,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
               category: "Impact (24h) \u00b7 select a setting to change it",
             }))
             const blocks = cacheBreakdownBlocks(
-              cacheBreakdown(toCacheRows(requests)),
+              cacheBreakdown(toCacheRows(requests, shapes)),
               {
                 order: idOrder(),
                 names: idNames(),

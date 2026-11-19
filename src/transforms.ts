@@ -221,8 +221,22 @@ export function transformBody(
   }
 }
 
+/**
+ * System entries that change from one prompt to the next (a plugin's
+ * per-prompt context). Relocated into msg[0] they would rewrite the whole
+ * cached conversation every time they appear or vanish, so they go after the
+ * last cache breakpoint instead.
+ */
+export const DEFAULT_VOLATILE_SYSTEM_PREFIXES: readonly string[] = [
+  "=== ",
+  "<claude-mem-context>",
+]
+
 /** The same rewrite as `transformBody`, in place on an already-parsed body. */
-export function transformParsed(parsed: TransformTarget): void {
+export function transformParsed(
+  parsed: TransformTarget,
+  volatilePrefixes: readonly string[] = DEFAULT_VOLATILE_SYSTEM_PREFIXES,
+): void {
   // --- Billing header: inject as system[0] (no cache_control) ---
   const version = process.env.ANTHROPIC_CLI_VERSION ?? config.ccVersion
   const entrypoint = process.env.CLAUDE_CODE_ENTRYPOINT ?? "sdk-cli"
@@ -293,23 +307,43 @@ export function transformParsed(parsed: TransformTarget): void {
   const BILLING_PREFIX = "x-anthropic-billing-header"
   const keptSystem: SystemEntry[] = []
   const movedTexts: string[] = []
+  const volatileTexts: string[] = []
   for (const entry of parsed.system) {
     const txt = typeof entry === "string" ? entry : (entry.text ?? "")
     if (txt.startsWith(BILLING_PREFIX) || txt.startsWith(SYSTEM_IDENTITY)) {
       keptSystem.push(entry)
     } else if (txt.length > 0) {
-      movedTexts.push(txt)
+      const head = txt.trimStart()
+      if (volatilePrefixes.some((p) => head.startsWith(p)))
+        volatileTexts.push(txt)
+      else movedTexts.push(txt)
     }
   }
-  if (movedTexts.length > 0 && Array.isArray(parsed.messages)) {
+  if (
+    movedTexts.length + volatileTexts.length > 0 &&
+    Array.isArray(parsed.messages)
+  ) {
     const firstUser = parsed.messages.find((m) => m.role === "user")
     if (firstUser) {
       parsed.system = keptSystem
-      const prefix = movedTexts.join("\n\n")
-      if (typeof firstUser.content === "string") {
-        firstUser.content = prefix + "\n\n" + firstUser.content
-      } else if (Array.isArray(firstUser.content)) {
-        firstUser.content.unshift({ type: "text", text: prefix })
+      if (movedTexts.length > 0) {
+        const prefix = movedTexts.join("\n\n")
+        if (typeof firstUser.content === "string") {
+          firstUser.content = prefix + "\n\n" + firstUser.content
+        } else if (Array.isArray(firstUser.content)) {
+          firstUser.content.unshift({ type: "text", text: prefix })
+        }
+      }
+      if (volatileTexts.length > 0) {
+        // After the last breakpoint and never marked itself: the cached prefix
+        // is the same with or without it.
+        const lastUser = parsed.messages.filter((m) => m.role === "user").at(-1)
+        const tail = { type: "text", text: volatileTexts.join("\n\n") }
+        if (lastUser && typeof lastUser.content === "string") {
+          lastUser.content = [{ type: "text", text: lastUser.content }, tail]
+        } else if (lastUser && Array.isArray(lastUser.content)) {
+          lastUser.content.push(tail)
+        }
       }
     }
   }

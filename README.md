@@ -637,6 +637,15 @@ hit rate, cache reads / writes / uncached input, and the top miss causes
 The figures come from the usage log's per-request token counts, which the quota
 cache cannot see.
 
+With `captureRequests` on, each request is joined to its captured shape, and a
+miss inside the TTL gets a sharper cause: **compaction** (the conversation
+collapsed from more than 10 messages to 3 or fewer, or the system prompt
+changed and the input shrank), **tool list changed** (the tool definitions
+differ), **per-prompt context toggled** (system and tools held but the first
+user message changed; see [Per-prompt system blocks](#per-prompt-system-blocks))
+and, for anything else, **prefix change**. Without a capture every miss inside
+the TTL is a prefix change.
+
 The first block, **Impact**, prices the same 24h: hit rate, the share of input
 cost caching saved versus no cache (read 0.05×/0.1×, 5m write 1.25×, 1h write
 2×), misses by cause with their share of cost, and one row per optimisation
@@ -922,46 +931,47 @@ Every key is available on all three surfaces: the config file, the inline plugin
 options, and the environment. A test enumerates the config type to keep that
 true, because ten keys had previously drifted into being file-only.
 
-| key                    | environment variable                     |
-| ---------------------- | ---------------------------------------- |
-| `debug`                | `CLAUDE_AUTH_DEBUG`                      |
-| `logLevel`             | `CLAUDE_AUTH_DEBUG_LEVEL`                |
-| `logEvents`            | `CLAUDE_AUTH_DEBUG_EVENTS`               |
-| `logMaxSize`           | `CLAUDE_AUTH_DEBUG_MAX_SIZE`             |
-| `logKeep`              | `CLAUDE_AUTH_DEBUG_KEEP`                 |
-| `quotaProbe`           | `CLAUDE_AUTH_QUOTA_PROBE`                |
-| `toastOnRefresh`       | `CLAUDE_AUTH_TOAST_REFRESH`              |
-| `accountLabel`         | `CLAUDE_AUTH_ACCOUNT_LABEL`              |
-| `refreshCheckInterval` | `CLAUDE_AUTH_REFRESH_CHECK_INTERVAL`     |
-| `refreshBeforeExpiry`  | `CLAUDE_AUTH_REFRESH_BEFORE_EXPIRY`      |
-| `noticeCooldown`       | `CLAUDE_AUTH_NOTICE_COOLDOWN`            |
-| `quotaProbeMaxAge`     | `CLAUDE_AUTH_QUOTA_PROBE_MAX_AGE`        |
-| `quotaMaxAge`          | `CLAUDE_AUTH_QUOTA_MAX_AGE`              |
-| `quotaWarnAt`          | `CLAUDE_AUTH_QUOTA_WARN_AT`              |
-| `quotaWeeklyWarnAt`    | `CLAUDE_AUTH_QUOTA_WEEKLY_WARN_AT`       |
-| `quotaAlternativeAt`   | `CLAUDE_AUTH_QUOTA_ALTERNATIVE_AT`       |
-| `configReloadInterval` | `CLAUDE_AUTH_CONFIG_RELOAD_INTERVAL`     |
-| `accounts`             | `CLAUDE_AUTH_ACCOUNTS` (comma-separated) |
-| `autoSwitch`           | `CLAUDE_AUTH_AUTO_SWITCH`                |
-| `switchAt`             | `CLAUDE_AUTH_SWITCH_AT`                  |
-| `switchWindow`         | `CLAUDE_AUTH_SWITCH_WINDOW`              |
-| `switchOn429`          | `CLAUDE_AUTH_SWITCH_ON_429`              |
-| `strategy`             | `CLAUDE_AUTH_STRATEGY`                   |
-| `bindBy`               | `CLAUDE_AUTH_BIND_BY`                    |
-| `pinBlocksRotation`    | `CLAUDE_AUTH_PIN_BLOCKS_ROTATION`        |
-| `agentReserve`         | `CLAUDE_AUTH_AGENT_RESERVE`              |
-| `pools`                | `CLAUDE_AUTH_POOLS` (JSON)               |
-| `ejectFor`             | `CLAUDE_AUTH_EJECT_FOR`                  |
-| `presets`              | `CLAUDE_AUTH_PRESETS` (JSON)             |
-| `groups`               | `CLAUDE_AUTH_GROUPS` (JSON)              |
-| `preset`               | `CLAUDE_AUTH_PRESET`                     |
-| `tools`                | `CLAUDE_AUTH_TOOLS`                      |
-| `contextLimit`         | `CLAUDE_AUTH_CONTEXT_LIMIT`              |
-| `agentModels`          | `CLAUDE_AUTH_AGENT_MODELS` (JSON)        |
-| `promptSections`       | `CLAUDE_AUTH_PROMPT_SECTIONS` (JSON)     |
-| `promptTrim`           | `CLAUDE_AUTH_PROMPT_TRIM` (JSON)         |
-| `otel`                 | `CLAUDE_AUTH_OTEL` (JSON)                |
-| `captureRequests`      | `CLAUDE_AUTH_CAPTURE_REQUESTS`           |
+| key                      | environment variable                          |
+| ------------------------ | --------------------------------------------- |
+| `debug`                  | `CLAUDE_AUTH_DEBUG`                           |
+| `logLevel`               | `CLAUDE_AUTH_DEBUG_LEVEL`                     |
+| `logEvents`              | `CLAUDE_AUTH_DEBUG_EVENTS`                    |
+| `logMaxSize`             | `CLAUDE_AUTH_DEBUG_MAX_SIZE`                  |
+| `logKeep`                | `CLAUDE_AUTH_DEBUG_KEEP`                      |
+| `quotaProbe`             | `CLAUDE_AUTH_QUOTA_PROBE`                     |
+| `toastOnRefresh`         | `CLAUDE_AUTH_TOAST_REFRESH`                   |
+| `accountLabel`           | `CLAUDE_AUTH_ACCOUNT_LABEL`                   |
+| `refreshCheckInterval`   | `CLAUDE_AUTH_REFRESH_CHECK_INTERVAL`          |
+| `refreshBeforeExpiry`    | `CLAUDE_AUTH_REFRESH_BEFORE_EXPIRY`           |
+| `noticeCooldown`         | `CLAUDE_AUTH_NOTICE_COOLDOWN`                 |
+| `quotaProbeMaxAge`       | `CLAUDE_AUTH_QUOTA_PROBE_MAX_AGE`             |
+| `quotaMaxAge`            | `CLAUDE_AUTH_QUOTA_MAX_AGE`                   |
+| `quotaWarnAt`            | `CLAUDE_AUTH_QUOTA_WARN_AT`                   |
+| `quotaWeeklyWarnAt`      | `CLAUDE_AUTH_QUOTA_WEEKLY_WARN_AT`            |
+| `quotaAlternativeAt`     | `CLAUDE_AUTH_QUOTA_ALTERNATIVE_AT`            |
+| `configReloadInterval`   | `CLAUDE_AUTH_CONFIG_RELOAD_INTERVAL`          |
+| `accounts`               | `CLAUDE_AUTH_ACCOUNTS` (comma-separated)      |
+| `autoSwitch`             | `CLAUDE_AUTH_AUTO_SWITCH`                     |
+| `switchAt`               | `CLAUDE_AUTH_SWITCH_AT`                       |
+| `switchWindow`           | `CLAUDE_AUTH_SWITCH_WINDOW`                   |
+| `switchOn429`            | `CLAUDE_AUTH_SWITCH_ON_429`                   |
+| `strategy`               | `CLAUDE_AUTH_STRATEGY`                        |
+| `bindBy`                 | `CLAUDE_AUTH_BIND_BY`                         |
+| `pinBlocksRotation`      | `CLAUDE_AUTH_PIN_BLOCKS_ROTATION`             |
+| `agentReserve`           | `CLAUDE_AUTH_AGENT_RESERVE`                   |
+| `pools`                  | `CLAUDE_AUTH_POOLS` (JSON)                    |
+| `ejectFor`               | `CLAUDE_AUTH_EJECT_FOR`                       |
+| `presets`                | `CLAUDE_AUTH_PRESETS` (JSON)                  |
+| `groups`                 | `CLAUDE_AUTH_GROUPS` (JSON)                   |
+| `preset`                 | `CLAUDE_AUTH_PRESET`                          |
+| `tools`                  | `CLAUDE_AUTH_TOOLS`                           |
+| `contextLimit`           | `CLAUDE_AUTH_CONTEXT_LIMIT`                   |
+| `agentModels`            | `CLAUDE_AUTH_AGENT_MODELS` (JSON)             |
+| `promptSections`         | `CLAUDE_AUTH_PROMPT_SECTIONS` (JSON)          |
+| `promptTrim`             | `CLAUDE_AUTH_PROMPT_TRIM` (JSON)              |
+| `volatileSystemPrefixes` | `CLAUDE_AUTH_VOLATILE_SYSTEM_PREFIXES` (JSON) |
+| `otel`                   | `CLAUDE_AUTH_OTEL` (JSON)                     |
+| `captureRequests`        | `CLAUDE_AUTH_CAPTURE_REQUESTS`                |
 
 Names follow `camelCase` -> `CLAUDE_AUTH_SCREAMING_SNAKE`, except the six that
 shipped before that convention and are kept as they are rather than renamed.
@@ -1107,6 +1117,30 @@ section start (the agent's own prompt) is never touched, and requests that
 carry no agent are left alone. List every block that follows a dropped one in
 `promptSections`, or it is dropped with it. Each trim is logged as
 `prompt_trimmed` with the bytes and section heads removed.
+
+## Per-prompt system blocks
+
+OAuth requests may only carry the billing header and the Claude Code identity
+in `system`, so the rest of the system prompt is moved to the start of the first
+user message. That message is the head of the cached prefix: anything in it
+that changes between prompts rewrites the whole cached conversation.
+
+Some plugins add a block to the system prompt on one prompt and drop it on the
+next (recalled notes, prior learnings). Those blocks are sent instead as the
+last text block of the last user message, after its cache breakpoint and
+without a marker of their own, so the cached prefix is the same with or without
+them. A system entry counts as per-prompt when its text, leading whitespace
+ignored, starts with one of these prefixes:
+
+```jsonc
+// ~/.config/opencode/claude-auth.jsonc
+{
+  // Default. [] moves everything to the first message, as before.
+  "volatileSystemPrefixes": ["=== ", "<claude-mem-context>"],
+}
+```
+
+A request without such a block is sent exactly as before.
 
 ## Hooks for other plugins
 

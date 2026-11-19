@@ -125,6 +125,59 @@ describe("toCacheRows", () => {
     // 9000 is well past 2s from the only shape at 1100, so no join.
     assert.equal(rows[1]!.systemSha, undefined)
   })
+
+  // The usage row is written when the response ends, the shape when it starts.
+  it("joins on the request's start, not when its usage was written", () => {
+    const rows = toCacheRows(
+      [
+        req({
+          account: "a",
+          created_at: 61_000,
+          duration_ms: 60_000,
+          session: "s1",
+        }),
+      ],
+      [{ sessionId: "s1", created_at: 1100, systemSha: "x" }],
+    )
+    assert.equal(rows[0]!.systemSha, "x")
+  })
+
+  it("derives the prefix hashes from a logged request shape", () => {
+    const shape = (sys: string, tool: number, m0: string, n: number) => ({
+      sessionId: "s1",
+      created_at: 1000,
+      system: [{ sha1: "bill" }, { sha1: sys }],
+      tools: [{ name: "read", bytes: tool }],
+      messages: Array.from({ length: n }, () => ({ role: "user", bytes: 1 })),
+      msg0: { sha1: m0, sections: [m0] },
+    })
+    const [a] = toCacheRows(
+      [req({ account: "a", created_at: 1000, session: "s1" })],
+      [shape("s", 10, "m", 12)],
+    )
+    const [b] = toCacheRows(
+      [req({ account: "a", created_at: 1000, session: "s1" })],
+      [shape("s", 11, "n", 2)],
+    )
+    assert.equal(a!.systemSha, b!.systemSha)
+    assert.notEqual(a!.toolsSha, b!.toolsSha)
+    assert.equal(a!.msg0Sha, "m")
+    assert.equal(a!.messageCount, 12)
+    assert.equal(b!.messageCount, 2)
+  })
+
+  it("keeps duration_ms from the usage log", () => {
+    const [r] = requestsFromUsage([
+      {
+        kind: "request",
+        account: "a",
+        model: "m",
+        created_at: 5,
+        duration_ms: 3,
+      },
+    ] as never)
+    assert.equal(r!.duration_ms, 3)
+  })
 })
 
 describe("cache breakdown views", () => {

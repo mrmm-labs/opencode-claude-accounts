@@ -30,7 +30,11 @@ export type PreparedBody = {
 export function prepareBody(
   raw: BodyInit | null | undefined,
   parsed: unknown,
-  opts: { ttl?: ResolvedTtl; contextEditing?: ContextEditingSettings | null },
+  opts: {
+    ttl?: ResolvedTtl
+    contextEditing?: ContextEditingSettings | null
+    volatileSystemPrefixes?: readonly string[]
+  },
 ): PreparedBody {
   const unchanged: PreparedBody = {
     body: raw,
@@ -41,7 +45,7 @@ export function prepareBody(
   if (typeof raw !== "string" || !parsed || typeof parsed !== "object")
     return unchanged
   try {
-    transformParsed(parsed as TransformTarget)
+    transformParsed(parsed as TransformTarget, opts.volatileSystemPrefixes)
   } catch {
     return unchanged
   }

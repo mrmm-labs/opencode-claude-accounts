@@ -731,6 +731,13 @@ export type ClaudeAuthConfig = {
    */
   promptTrim: Record<string, string[]>
   /**
+   * System blocks that change on every prompt, by the start of their text.
+   * They are sent after the last cache breakpoint instead of in the first
+   * message, so adding or dropping one does not rewrite the cached history.
+   * `[]` sends everything to the first message, as before.
+   */
+  volatileSystemPrefixes: string[]
+  /**
    * OpenTelemetry spans for model requests and tool calls, sent as OTLP/HTTP
    * JSON to `endpoint` (e.g. http://localhost:4318). Empty endpoint: off.
    */
@@ -797,6 +804,9 @@ export const DEFAULT_CONFIG: ClaudeAuthConfig = {
     "Here is some useful information about the environment you are running in:",
   ],
   promptTrim: {},
+  // Same as transforms.ts DEFAULT_VOLATILE_SYSTEM_PREFIXES (a test pins it);
+  // not imported, as that module spawns `claude --version` on load.
+  volatileSystemPrefixes: ["=== ", "<claude-mem-context>"],
   otel: { endpoint: "" },
   retryPrefillError: false,
   captureRequests: "off",
@@ -1018,6 +1028,8 @@ export function sanitize(raw: unknown): Partial<ClaudeAuthConfig> {
       : undefined
   const sections = strings(r.promptSections)
   if (sections) out.promptSections = sections
+  const volatile = strings(r.volatileSystemPrefixes)
+  if (volatile) out.volatileSystemPrefixes = volatile
   if (
     r.promptTrim &&
     typeof r.promptTrim === "object" &&
@@ -1190,6 +1202,14 @@ const ENV_PARSERS: Record<string, EnvParser> = {
   promptSections: (v) => {
     try {
       return sanitize({ promptSections: JSON.parse(v) }).promptSections
+    } catch {
+      return undefined
+    }
+  },
+  volatileSystemPrefixes: (v) => {
+    try {
+      return sanitize({ volatileSystemPrefixes: JSON.parse(v) })
+        .volatileSystemPrefixes
     } catch {
       return undefined
     }

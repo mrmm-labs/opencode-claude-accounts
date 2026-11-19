@@ -37,6 +37,7 @@ import {
   reserveAllowed,
   revokeReserve,
 } from "../balance/sessions.ts"
+import { readShapeFile } from "../introspect.ts"
 import { log } from "../logger.ts"
 import { accountKey } from "../balance/account-key.ts"
 import { getConfig } from "../config.ts"
@@ -121,8 +122,12 @@ export const claudeAccountsTools = {
       const nameOf = (source: string, label?: string) =>
         cfg.accountIds[accountKey(source)]?.name ?? label ?? source
 
+      const since = Date.now() - 24 * 60 * 60_000
+      // Shapes exist only while captureRequests is on; without them every
+      // unexplained miss reads as a prefix change.
       const day = toCacheRows(
-        requestsFromUsage(readUsage(Date.now() - 24 * 60 * 60_000)),
+        requestsFromUsage(readUsage(since)),
+        readShapeFile().filter((s) => s.created_at >= since),
       )
       const ci = cacheImpact(day)
       const misses = Object.entries(ci.byCause)

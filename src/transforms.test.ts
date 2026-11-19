@@ -1,10 +1,13 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
+import { DEFAULT_CONFIG } from "./config.ts"
 import {
+  DEFAULT_VOLATILE_SYSTEM_PREFIXES,
   flattenInputSchema,
   repairToolPairs,
   stripToolPrefix,
   transformBody,
+  transformParsed,
   transformResponseStream,
 } from "./transforms.ts"
 
@@ -1157,5 +1160,145 @@ describe("transforms", () => {
         required: ["q"],
       })
     })
+  })
+})
+
+describe("volatile system tail", () => {
+  const identity = "You are Claude Code, Anthropic's official CLI for Claude."
+  type Body = {
+    system: Array<{ text: string }>
+    messages: Array<{
+      role: string
+      content:
+        | string
+        | Array<{ type: string; text?: string; cache_control?: unknown }>
+    }>
+  }
+  const body = (system: Array<Record<string, unknown>>, messages?: unknown) =>
+    JSON.stringify({
+      model: "claude-opus-4-7",
+      system,
+      messages: messages ?? [
+        { role: "user", content: [{ type: "text", text: "first" }] },
+        { role: "assistant", content: [{ type: "text", text: "ok" }] },
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: "second",
+              cache_control: { type: "ephemeral" },
+            },
+          ],
+        },
+      ],
+    })
+  const stable = [
+    {
+      type: "text",
+      text: identity + "\nStable rules",
+      cache_control: { type: "ephemeral" },
+    },
+    {
+      type: "text",
+      text: "Instructions from: AGENTS.md\nbe terse",
+      cache_control: { type: "ephemeral" },
+    },
+    { type: "text", text: "📌 RUN: x" },
+  ]
+  const injected = { type: "text", text: "=== prior learnings\n- a\n- b" }
+  const run = (s: string): Body => {
+    const prev = process.env.ANTHROPIC_CLI_VERSION
+    process.env.ANTHROPIC_CLI_VERSION = "2.1.0"
+    try {
+      return JSON.parse(transformBody(s) as string) as Body
+    } finally {
+      if (prev === undefined) delete process.env.ANTHROPIC_CLI_VERSION
+      else process.env.ANTHROPIC_CLI_VERSION = prev
+    }
+  }
+  const markers = (b: Body) =>
+    JSON.stringify(b).split('"cache_control"').length - 1
+
+  it("leaves a body without volatile entries byte-identical", () => {
+    const prev = process.env.ANTHROPIC_CLI_VERSION
+    process.env.ANTHROPIC_CLI_VERSION = "2.1.0"
+    try {
+      assert.equal(
+        transformBody(body(stable)),
+        '{"model":"claude-opus-4-7","system":[{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.0.818; cc_entrypoint=sdk-cli; cch=a7937;"},{"type":"text","text":"You are Claude Code, Anthropic\'s official CLI for Claude."}],"messages":[{"role":"user","content":[{"type":"text","text":"Stable rules\\n\\nInstructions from: AGENTS.md\\nbe terse\\n\\n📌 RUN: x"},{"type":"text","text":"first"}]},{"role":"assistant","content":[{"type":"text","text":"ok"}]},{"role":"user","content":[{"type":"text","text":"second","cache_control":{"type":"ephemeral"}}]}]}',
+      )
+    } finally {
+      if (prev === undefined) delete process.env.ANTHROPIC_CLI_VERSION
+      else process.env.ANTHROPIC_CLI_VERSION = prev
+    }
+  })
+
+  it("keeps msg[0] identical whether or not a per-prompt block is present", () => {
+    const without = run(body(stable))
+    const withIt = run(body([...stable, injected]))
+    assert.deepEqual(withIt.messages[0], without.messages[0])
+    assert.deepEqual(withIt.system, without.system)
+  })
+
+  it("appends the volatile block after the last user message's breakpoint, uncached", () => {
+    const out = run(
+      body([...stable, { ...injected, cache_control: { type: "ephemeral" } }]),
+    )
+    const last = out.messages[2]!.content as Array<{
+      type: string
+      text?: string
+      cache_control?: unknown
+    }>
+    assert.equal(last.length, 2)
+    assert.deepEqual(last[0], {
+      type: "text",
+      text: "second",
+      cache_control: { type: "ephemeral" },
+    })
+    assert.deepEqual(last[1], { type: "text", text: injected.text })
+    assert.equal(markers(out), markers(run(body(stable))))
+    const first = out.messages[0]!.content as Array<{ text: string }>
+    assert.ok(!first[0]!.text.includes("prior learnings"))
+  })
+
+  it("matches the default prefixes after leading whitespace", () => {
+    const out = run(
+      body([
+        ...stable,
+        {
+          type: "text",
+          text: "\n  <claude-mem-context>\nrecent</claude-mem-context>",
+        },
+      ]),
+    )
+    const last = out.messages[2]!.content as Array<{ text: string }>
+    assert.ok(last[last.length - 1]!.text.includes("<claude-mem-context>"))
+  })
+
+  it("turns a string last message into blocks so the tail stays separate", () => {
+    const out = run(
+      body([...stable, injected], [{ role: "user", content: "only" }]),
+    )
+    const content = out.messages[0]!.content as Array<{ text: string }>
+    assert.equal(content.length, 2)
+    assert.ok(content[0]!.text.startsWith("Stable rules"))
+    assert.ok(content[0]!.text.endsWith("\n\nonly"))
+    assert.equal(content[1]!.text, injected.text)
+  })
+
+  it("has the same default as the config", () => {
+    assert.deepEqual(
+      DEFAULT_CONFIG.volatileSystemPrefixes,
+      DEFAULT_VOLATILE_SYSTEM_PREFIXES,
+    )
+  })
+
+  it("relocates everything into msg[0] when the prefix list is empty", () => {
+    const parsed = JSON.parse(body([...stable, injected])) as Body
+    transformParsed(parsed as never, [])
+    const first = parsed.messages[0]!.content as Array<{ text: string }>
+    assert.ok(first[0]!.text.endsWith(injected.text))
+    assert.equal((parsed.messages[2]!.content as unknown[]).length, 1)
   })
 })

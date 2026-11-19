@@ -156,6 +156,40 @@ describe("readShapeFile", () => {
 
 // Regression: capture re-parsed the whole outgoing body, a second full parse
 // of the conversation on every captured request.
+describe("describeRequest prefix hashes", () => {
+  const req = (prefix: string, desc: string) =>
+    JSON.stringify({
+      model: "m",
+      tools: [{ name: "read", description: desc }],
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: prefix },
+            { type: "text", text: "hello" },
+          ],
+        },
+      ],
+    })
+
+  it("hashes msg[0] per section, without its text", () => {
+    const a = describeRequest(req("rules", "d"), "shape", "s")!
+    const b = describeRequest(req("rules + learnings", "d"), "shape", "s")!
+    assert.equal(a.msg0?.sections.length, 2)
+    assert.notEqual(a.msg0?.sections[0], b.msg0?.sections[0])
+    assert.equal(a.msg0?.sections[1], b.msg0?.sections[1])
+    assert.notEqual(a.msg0?.sha1, b.msg0?.sha1)
+    assert.ok(!JSON.stringify(a).includes("rules"))
+  })
+
+  it("hashes the tool set so a same-size description change shows", () => {
+    const a = describeRequest(req("x", "aa"), "shape", "s")!
+    const b = describeRequest(req("x", "bb"), "shape", "s")!
+    assert.equal(a.toolBytes, b.toolBytes)
+    assert.notEqual(a.toolsSha, b.toolsSha)
+  })
+})
+
 describe("describeRequest on a parsed body", () => {
   it("describes the object without parsing or changing it", () => {
     const obj = JSON.parse(body()) as object
