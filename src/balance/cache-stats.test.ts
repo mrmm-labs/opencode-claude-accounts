@@ -135,6 +135,70 @@ describe("cacheStats miss causes", () => {
     assert.equal(m[1]!.cause, "compaction")
   })
 
+  it("labels a changed tool set tools-changed", () => {
+    const m = miss([
+      row({ cacheWrite: 1000, systemSha: "s", toolsSha: "t1", msg0Sha: "m" }),
+      row({
+        cacheWrite: 1000,
+        systemSha: "s",
+        toolsSha: "t2",
+        msg0Sha: "m",
+        at: T0 + 1000,
+      }),
+    ])
+    assert.equal(m[1]!.cause, "tools-changed")
+  })
+
+  it("labels a collapsed message count compaction", () => {
+    const m = miss([
+      row({ cacheWrite: 1000, systemSha: "s", messageCount: 40 }),
+      row({
+        input: 9000,
+        cacheWrite: 1000,
+        systemSha: "s",
+        messageCount: 2,
+        at: T0 + 1000,
+      }),
+    ])
+    assert.equal(m[1]!.cause, "compaction")
+  })
+
+  it("does not call a short conversation's change compaction", () => {
+    const m = miss([
+      row({ cacheWrite: 1000, messageCount: 8, msg0Sha: "a" }),
+      row({ cacheWrite: 1000, messageCount: 2, msg0Sha: "b", at: T0 + 1000 }),
+    ])
+    assert.equal(m[1]!.cause, "injection-toggle")
+  })
+
+  it("labels a changed msg[0] under the same system and tools injection-toggle", () => {
+    const m = miss([
+      row({ cacheWrite: 1000, systemSha: "s", toolsSha: "t", msg0Sha: "a" }),
+      row({
+        cacheWrite: 1000,
+        systemSha: "s",
+        toolsSha: "t",
+        msg0Sha: "b",
+        at: T0 + 1000,
+      }),
+    ])
+    assert.equal(m[1]!.cause, "injection-toggle")
+  })
+
+  it("falls back to prefix-change when nothing explains the miss", () => {
+    const m = miss([
+      row({ cacheWrite: 1000, systemSha: "s", toolsSha: "t", msg0Sha: "a" }),
+      row({
+        cacheWrite: 1000,
+        systemSha: "s",
+        toolsSha: "t",
+        msg0Sha: "a",
+        at: T0 + 1000,
+      }),
+    ])
+    assert.equal(m[1]!.cause, "prefix-change")
+  })
+
   it("does not flag a warm request as a miss", () => {
     const m = miss([
       row({ input: 10, cacheWrite: 2000, systemSha: "x" }),

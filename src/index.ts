@@ -1106,6 +1106,7 @@ const plugin: PluginWithOptions = async (
                 contextEditingDisabled || !requestPath.endsWith("/messages")
                   ? null
                   : resolveContextEditing(getConfig()),
+              volatileSystemPrefixes: getConfig().volatileSystemPrefixes,
             })
             let body = prepared.body
             let contextEdited = prepared.contextEdited

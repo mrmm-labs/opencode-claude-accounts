@@ -428,6 +428,7 @@ describe("config surface coverage", () => {
     agentModels: '{"general":"claude-sonnet-5-5"}',
     promptSections: '["Instructions from: ","MODE ACTIVE"]',
     promptTrim: '{"*":["MODE ACTIVE"],"build":[]}',
+    volatileSystemPrefixes: '["<per-prompt>"]',
     otel: '{"endpoint":"http://localhost:4318"}',
     retryPrefillError: "1",
     captureRequests: "messages",

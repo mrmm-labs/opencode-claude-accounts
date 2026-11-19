@@ -79,6 +79,13 @@ export type RequestShape = {
   systemBytes: number
   tools: ToolShape[]
   toolBytes: number
+  /** Hash of the whole tool list, so a same-size description change shows. */
+  toolsSha?: string
+  /**
+   * Hashes of the first user message, whole and per content block. Relocated
+   * system text lands there, so this is where a prefix change shows.
+   */
+  msg0?: { sha1: string; sections: string[] }
   /** Role and size always; `content` only at level "messages". */
   messages: Array<{ role: string; bytes: number; content?: unknown }>
   messageBytes: number
@@ -157,6 +164,27 @@ function messageCachedBytes(messages: unknown): number {
   return total
 }
 
+function firstUserHashes(
+  messages: unknown[],
+): RequestShape["msg0"] | undefined {
+  const first = messages.find(
+    (m) => (m as { role?: unknown } | null)?.role === "user",
+  ) as { content?: unknown } | undefined
+  if (!first) return undefined
+  const blocks = Array.isArray(first.content) ? first.content : [first.content]
+  const sections = blocks.map((b) => {
+    const text = (b as { text?: unknown } | null)?.text
+    return sha1(
+      typeof b === "string"
+        ? b
+        : typeof text === "string"
+          ? text
+          : JSON.stringify(b ?? null),
+    )
+  })
+  return { sha1: sha1(sections.join(",")), sections }
+}
+
 function toolShapes(tools: unknown): ToolShape[] {
   if (!Array.isArray(tools)) return []
   return tools.map((raw) => {
@@ -214,6 +242,7 @@ export function describeRequest(
     return entry
   })
 
+  const msg0 = firstUserHashes(rawMessages)
   const now = Date.now()
   return {
     timestamp: new Date(now).toISOString(),
@@ -228,6 +257,10 @@ export function describeRequest(
     systemBytes: system.reduce((n, b) => n + b.bytes, 0),
     tools,
     toolBytes: tools.reduce((n, t) => n + t.bytes, 0),
+    ...(Array.isArray(parsed.tools)
+      ? { toolsSha: sha1(JSON.stringify(parsed.tools)) }
+      : {}),
+    ...(msg0 ? { msg0 } : {}),
     messages,
     messageBytes: messages.reduce((n, m) => n + m.bytes, 0),
     cachedBytes:

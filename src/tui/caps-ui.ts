@@ -149,6 +149,8 @@ export type RequestLike = {
   account: string
   model: string
   created_at: number
+  /** Request duration; the usage row is written when the response ends. */
+  duration_ms?: number
   session?: string
   input?: number
   output?: number
@@ -159,12 +161,20 @@ export type RequestLike = {
   contextEdited?: boolean
 }
 
-/** A shape-log entry, joined by session+time to give a request its prefix hashes. */
+/**
+ * A shape-log entry, joined by session+time to give a request its prefix
+ * hashes. Takes a logged RequestShape as is: hashes it lacks are derived from
+ * its per-block hashes and sizes, so older logs classify too.
+ */
 export type ShapeLike = {
   sessionId: string | null
   created_at: number
   systemSha?: string
   toolsSha?: string
+  system?: readonly { sha1: string }[]
+  tools?: readonly { name: string; bytes: number }[]
+  messages?: readonly unknown[]
+  msg0?: { sha1: string }
 }
 
 /**
@@ -189,7 +199,7 @@ export function toCacheRows(
     let best: ShapeLike | undefined
     let bestGap = joinMs
     for (const s of bySession.get(r.session) ?? []) {
-      const gap = Math.abs(s.created_at - r.created_at)
+      const gap = Math.abs(s.created_at - (r.created_at - (r.duration_ms ?? 0)))
       if (gap <= bestGap) {
         bestGap = gap
         best = s
@@ -210,8 +220,12 @@ export function toCacheRows(
         cacheRead: r.cacheRead ?? 0,
         cacheWrite: r.cacheWrite ?? 0,
         cacheWrite1h: r.cacheWrite1h ?? 0,
-        systemSha: sh?.systemSha,
-        toolsSha: sh?.toolsSha,
+        systemSha: sh?.systemSha ?? sh?.system?.map((b) => b.sha1).join(","),
+        toolsSha:
+          sh?.toolsSha ??
+          sh?.tools?.map((t) => `${t.name}:${t.bytes}`).join(","),
+        ...(sh?.msg0 ? { msg0Sha: sh.msg0.sha1 } : {}),
+        ...(sh?.messages ? { messageCount: sh.messages.length } : {}),
         ...(r.session ? { session: r.session } : {}),
         ...(r.ttl ? { ttl: r.ttl } : {}),
         ...(r.contextEdited ? { contextEdited: true } : {}),
@@ -233,6 +247,7 @@ export function requestsFromUsage(
         account: e.account,
         model: e.model,
         created_at: e.created_at,
+        ...(e.duration_ms !== undefined ? { duration_ms: e.duration_ms } : {}),
         ...(e.session ? { session: e.session } : {}),
         input: e.input,
         output: e.output,

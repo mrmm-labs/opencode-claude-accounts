@@ -66,6 +66,20 @@ describe("prepareBody", () => {
     assert.equal(out.ttlSet, false)
   })
 
+  it("passes the volatile prefixes to the shape rewrite", () => {
+    const r = raw({ system: [{ type: "text", text: "@@ per prompt" }] })
+    const tail = (prefixes?: string[]) => {
+      const out = prepareBody(
+        r,
+        JSON.parse(r),
+        prefixes ? { volatileSystemPrefixes: prefixes } : {},
+      )
+      return JSON.parse(String(out.body)).messages[0].content.at(-1).text
+    }
+    assert.equal(tail(["@@ "]), "@@ per prompt")
+    assert.equal(tail(), "hi")
+  })
+
   it("leaves a non-JSON or non-string body alone", () => {
     assert.equal(prepareBody("not json", undefined, {}).body, "not json")
     const blob = new Blob(["x"])

@@ -32,6 +32,10 @@ export type CacheRow = {
   systemSha?: string
   /** Hash of the tool set, from the request-shape log, if present. */
   toolsSha?: string
+  /** Hash of the first user message, where relocated system text lands. */
+  msg0Sha?: string
+  /** Messages in the request, from the shape log; a collapse means compaction. */
+  messageCount?: number
   /** The request carried a context-editing block. */
   contextEdited?: boolean
   /** OpenCode session, so misses are classified against the same session's previous request. */
@@ -45,6 +49,8 @@ export type MissCause =
   | "ttl-expired"
   | "prefix-change"
   | "compaction"
+  | "tools-changed"
+  | "injection-toggle"
 
 export type Miss = {
   at: number
@@ -85,9 +91,10 @@ function isMiss(r: CacheRow): boolean {
  * Ordered by how unambiguous the signal is: no predecessor, then a changed
  * account or model (the cache is per-account and per-model, so either guarantees
  * a cold prefix), then an expired TTL (idle longer than the write's lifetime),
- * then a changed prefix within a live TTL (same account/model but the system or
- * tools hash moved), and finally compaction — a prefix change that also shrank
- * the conversation, which is the one shape we can tell apart.
+ * then compaction (the message count collapsed), a changed tool set, a changed
+ * system prefix (compaction again if it also shrank the input), and a changed
+ * first message under the same system and tools. Shape hashes come from the
+ * request-shape log; without them every unexplained miss is a prefix change.
  */
 function classify(r: CacheRow, prev: CacheRow | undefined): MissCause {
   if (!prev) return "first-request"
@@ -98,15 +105,21 @@ function classify(r: CacheRow, prev: CacheRow | undefined): MissCause {
   const ttl = r.ttl ?? "5m"
   if (r.at - prev.at > TTL_MS[ttl]) return "ttl-expired"
 
-  const prefixChanged =
-    (r.systemSha !== undefined &&
-      prev.systemSha !== undefined &&
-      r.systemSha !== prev.systemSha) ||
-    (r.toolsSha !== undefined &&
-      prev.toolsSha !== undefined &&
-      r.toolsSha !== prev.toolsSha)
+  // OpenCode's compaction replaces the history with a summary: a long
+  // conversation becomes two or three messages.
+  if (
+    r.messageCount !== undefined &&
+    prev.messageCount !== undefined &&
+    prev.messageCount > 10 &&
+    r.messageCount <= 3
+  )
+    return "compaction"
 
-  if (prefixChanged) {
+  const differs = (a?: string, b?: string) =>
+    a !== undefined && b !== undefined && a !== b
+  if (differs(r.toolsSha, prev.toolsSha)) return "tools-changed"
+
+  if (differs(r.systemSha, prev.systemSha)) {
     // A prefix change that also dropped input tokens is a compaction: the
     // conversation was summarised, so the cacheable head is both different and
     // smaller. Distinguishable from an ordinary edit, which grows or holds.
@@ -115,6 +128,10 @@ function classify(r: CacheRow, prev: CacheRow | undefined): MissCause {
     if (totalIn < prevIn) return "compaction"
     return "prefix-change"
   }
+
+  // System and tools held, but the first message moved: per-prompt context
+  // that came and went in the relocated system text.
+  if (differs(r.msg0Sha, prev.msg0Sha)) return "injection-toggle"
 
   // Same account, model, prefix, within TTL, yet it still wrote more than it
   // read. Best explained as a prefix change we could not see (no shape hashes).
@@ -235,6 +252,8 @@ export const MISS_CAUSE_LABEL: Record<MissCause, string> = {
   "ttl-expired": "TTL expired",
   "prefix-change": "prefix change",
   compaction: "compaction",
+  "tools-changed": "tool list changed",
+  "injection-toggle": "per-prompt context toggled",
 }
 
 /** One bucket of a breakdown: the headline figures, without the per-miss list. */
