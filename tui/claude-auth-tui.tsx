@@ -109,7 +109,6 @@ import {
   worstCacheAccount,
   ceilingView,
   optimizationRows,
-  optimizeSidebarRows,
   migrationPreviewRows,
   paletteTitle,
   rankedAdvice,
@@ -118,6 +117,14 @@ import {
   type RequestLike,
   type ShapeLike as CacheShape,
 } from "../dist/tui/caps-ui.js"
+import {
+  collapsedLine,
+  layoutButtons,
+  layoutOptimize,
+  optimizeView,
+  type ButtonId,
+  type Tone,
+} from "../dist/tui/optimize-layout.js"
 import {
   applyMigration,
   membersForMigration,
@@ -487,6 +494,8 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
   // The pace forecast scans up to two generations of the telemetry log, so it
   // refreshes on its own slower clock rather than on every quota poll.
   const FORECAST_MS = 60_000
+  // Until the Optimize box has been laid out and can be measured.
+  const OPTIMIZE_WIDTH = 36
   // The pace forecast itself is cheap enough to follow the quota closely.
   const PACE_MS = 15_000
   // Ceilings the pool is allowed to spend, keyed by source for the forecast.
@@ -1070,7 +1079,11 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
   )
   // A clickable label. Mouse-up, not down: a press that drags off cancels, as in
   // every other TUI button.
-  const Button = (props: { label: string; onClick: () => void }) => {
+  const Button = (props: {
+    label: string
+    onClick: () => void
+    primary?: boolean
+  }) => {
     const [hover, setHover] = createSignal(false)
     return (
       <box
@@ -1078,7 +1091,15 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
         onMouseOver={() => setHover(true)}
         onMouseOut={() => setHover(false)}
       >
-        <text fg={hover() ? api.theme.current.text : api.theme.current.info}>
+        <text
+          fg={
+            hover()
+              ? api.theme.current.text
+              : props.primary
+                ? api.theme.current.accent
+                : api.theme.current.info
+          }
+        >
           [{props.label}]
         </text>
       </box>
@@ -1462,11 +1483,11 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
       sidebar_content(_ctx, props: { session_id: string }) {
         // Short on purpose: the top fixes and one line of usage. Everything else is
         // in /tokens, which can paste it into the prompt.
-        const rows = (): Row[] => {
+        const view = () => {
           const id = props.session_id
           const c = compoOf(id)
           const reqs = sessionRequests(id)
-          return optimizeSidebarRows({
+          return optimizeView({
             session: sessionTotals(api.state.session.messages(id)),
             ...(reqs.length ? { cache: cacheImpact(toCacheRows(reqs)) } : {}),
             ...(worstAccount() ? { worstAccount: worstAccount()! } : {}),
@@ -1475,30 +1496,90 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
             contextLimit: getConfig().contextLimit,
           })
         }
+        // The slot gives no width, so measure the box the section sits in.
+        const [width, setWidth] = createSignal(OPTIMIZE_WIDTH)
+        const measure = (box: { width: number }) => {
+          if (box.width > 0) setWidth(box.width)
+        }
+        const toneColour = (t: Tone) =>
+          t === "critical"
+            ? api.theme.current.error
+            : t === "warn"
+              ? api.theme.current.warning
+              : t === "muted"
+                ? api.theme.current.textMuted
+                : api.theme.current.text
+        const actions: Record<ButtonId, () => void> = {
+          plan: () => sendOptimize(props.session_id),
+          prompt: () => toPrompt(reportText(props.session_id), "Report"),
+          details: () => openDetails(props.session_id),
+          refresh: refreshAll,
+        }
         return (
-          <box>
-            <Heading title="Optimize" note="(this session)" fold="optimize" />
-            <Show when={!isFolded("optimize")}>
-              <Rows rows={rows()} />
-              <box flexDirection="row" gap={1}>
-                <Button label="↻ refresh" onClick={refreshAll} />
-                <Button
-                  label="details"
-                  onClick={() => openDetails(props.session_id)}
-                />
-              </box>
-              <box flexDirection="row" gap={1}>
-                <Button
-                  label="→ prompt"
-                  onClick={() =>
-                    toPrompt(reportText(props.session_id), "Report")
-                  }
-                />
-                <Button
-                  label="fix plan"
-                  onClick={() => sendOptimize(props.session_id)}
-                />
-              </box>
+          <box
+            ref={(box: { width: number; onSizeChange?: () => void }) => {
+              measure(box)
+              box.onSizeChange = () => measure(box)
+            }}
+          >
+            <Show
+              when={!isFolded("optimize")}
+              fallback={
+                <text
+                  wrapMode="none"
+                  truncate
+                  fg={api.theme.current.text}
+                  onMouseUp={() => toggleSection("optimize")}
+                >
+                  {collapsedLine(view(), width()).head}
+                  <span style={{ fg: api.theme.current.textMuted }}>
+                    {collapsedLine(view(), width()).note}
+                  </span>
+                </text>
+              }
+            >
+              <Heading title="Optimize" note="(this session)" fold="optimize" />
+              <For each={layoutOptimize(view(), width())}>
+                {(line) => (
+                  <text wrapMode="none" truncate>
+                    <For
+                      each={
+                        line.length
+                          ? line
+                          : [{ text: " ", tone: "text" as Tone }]
+                      }
+                    >
+                      {(seg) => (
+                        <span style={{ fg: toneColour(seg.tone) }}>
+                          {seg.text}
+                        </span>
+                      )}
+                    </For>
+                  </text>
+                )}
+              </For>
+              <box height={1} />
+              <For each={layoutButtons(width())}>
+                {(row) => (
+                  <box flexDirection="row" gap={1}>
+                    <For each={row}>
+                      {(item) =>
+                        item.kind === "sep" ? (
+                          <text fg={api.theme.current.textMuted}>
+                            {"\u00b7"}
+                          </text>
+                        ) : (
+                          <Button
+                            label={item.label}
+                            primary={item.primary}
+                            onClick={actions[item.id]}
+                          />
+                        )
+                      }
+                    </For>
+                  </box>
+                )}
+              </For>
             </Show>
           </box>
         )
