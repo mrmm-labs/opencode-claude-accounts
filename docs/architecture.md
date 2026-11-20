@@ -109,7 +109,7 @@ flowchart TD
 
 Every branch taken is recorded, in order, as `steps` on the request's usage
 row (`bound`/`active`, `ttl-1h`, `ctx-edit`, `auth-401`, `prefill-trim`,
-`ctx-off`, `beta-off`, `rotate`, `spent`, `status`). `/claude requests` lists recent
+`ctx-off`, `beta-off`, `rotate`, `spent`, `status`). `/cc-requests` lists recent
 requests and shows each one's path through this diagram.
 
 Each recovery branch runs at most once per request. The order matters: a

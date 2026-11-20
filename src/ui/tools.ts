@@ -141,7 +141,7 @@ export const claudeAccountsTools = {
         `autoSwitch:  ${cfg.autoSwitch} — moves by itself at ${Math.round(cfg.switchAt * 100)}% of ${cfg.switchWindow}, on429 ${cfg.switchOn429}`,
         `caps:        capMode ${cfg.capMode}; this session may spend reserved quota: ${overrideOn}`,
         `cache 24h:   ${ci.requests ? `${pct(ci.hitRate)} hit, saves ${pct(ci.saved)} of input cost over ${ci.requests} req; misses: ${misses || "none"}` : "no requests with token data"}`,
-        `optimise:    cacheTtl ${cfg.cacheTtl} (1h on ${ci.ttl1h.requests} req); contextEditing ${cfg.contextEditing ? "on" : "off"} (applied ${ci.contextEdited} req); bindBy ${cfg.bindBy} — change with /claude cache or /claude config`,
+        `optimise:    cacheTtl ${cfg.cacheTtl} (1h on ${ci.ttl1h.requests} req); contextEditing ${cfg.contextEditing ? "on" : "off"} (applied ${ci.contextEdited} req); bindBy ${cfg.bindBy} — change with /cc-cache or /cc-config`,
         "",
         "accounts (* = serving this session):",
       ]

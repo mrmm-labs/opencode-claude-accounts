@@ -1,15 +1,15 @@
 /**
- * The one `/claude` command: its sub-commands, how typed input is read, and how
+ * The `/cc` command and its `/cc-<sub>` entries: its sub-commands, how typed input is read, and how
  * missing arguments are asked for.
  *
  * The host completes only a slash command's name, never what follows it. So
- * "completion" here is an interactive chain of searchable pickers: `/claude`
+ * "completion" here is an interactive chain of searchable pickers: `/cc`
  * lists the sub-commands, picking one asks for each argument it still needs.
  * Typing the whole thing is the fast path and skips the dialogs it can.
  *
  * Everything decidable lives here, as pure functions over a `Live` snapshot and
  * a `Dialogs` interface, so it is tested with a fake dialog. The registry is the
- * single source for parsing, the pickers, `/claude help` and the README table.
+ * single source for parsing, the pickers, `/cc-help` and the README table.
  */
 
 export type Args = Record<string, string>
@@ -89,7 +89,7 @@ export type Spec = {
   args: readonly Arg[]
 }
 
-/** The order here is the order of `/claude help` and the README table. */
+/** The order here is the order of `/cc-help` and the README table. */
 export const SPECS = [
   {
     name: "switch",
@@ -263,13 +263,57 @@ export function commandsWith(runs: Record<CommandName, Run>): Command[] {
   return SPECS.map((s) => ({ ...s, run: runs[s.name] }))
 }
 
-export const SLASH = "claude"
+/** The bare command: the picker, and `/cc <sub> <rest>` as the typed form. */
+export const SLASH = "cc"
+
+/** The slash name of one sub-command: the host completes this while typing `/cc-`. */
+export const slashNameOf = (name: string) => `${SLASH}-${name}`
 
 export function usage(spec: Pick<Spec, "name" | "args">): string {
   const args = spec.args.map((a) =>
     a.optional ? `[${a.placeholder}]` : `<${a.placeholder}>`,
   )
-  return [`/${SLASH}`, spec.name, ...args].join(" ")
+  return [`/${slashNameOf(spec.name)}`, ...args].join(" ")
+}
+
+/** What the host's completion list shows next to the name. */
+export function slashDescription(spec: Spec): string {
+  const t = spec.title
+  return `${t.charAt(0).toLowerCase()}${t.slice(1)} \u00b7 ${usage(spec)}`
+}
+
+export type SlashEntry = {
+  name: string
+  title: string
+  description: string
+  slashName: string
+  slashArguments: true
+  /** Reachable by typing only: the palette has its own entry per sub-command. */
+  palette: false
+  /** V1 hosts pass a context object, not the typed rest: that is no input. */
+  run: (input?: unknown) => void | Promise<void>
+}
+
+/**
+ * One slash entry per sub-command, generated from the registry so the host's
+ * `/` completion offers every one by name. Each forwards to the same dispatch
+ * as `/cc <sub> <rest>`: typed arguments run directly, missing ones walk the
+ * pickers.
+ */
+export function slashEntries(
+  specs: readonly Spec[],
+  forward: (input: string) => void | Promise<void>,
+): SlashEntry[] {
+  return specs.map((s) => ({
+    name: `claude-auth.slash.${s.name}`,
+    title: s.title,
+    description: slashDescription(s),
+    slashName: slashNameOf(s.name),
+    slashArguments: true,
+    palette: false,
+    run: (input) =>
+      forward(`${s.name} ${typeof input === "string" ? input : ""}`.trim()),
+  }))
 }
 
 const optionsOf = (arg: Arg, live: Live, args: Args): Option[] =>
@@ -327,7 +371,7 @@ export type Parsed =
       extra: string[]
     }
 
-/** Everything after `/claude`, read against the registry. */
+/** Everything after `/cc`, read against the registry. */
 export function parse(
   input: string | undefined,
   live: Live,
@@ -375,7 +419,7 @@ export function parse(
   return { kind: "command", spec, args, extra: tokens }
 }
 
-/** The sub-command list: this is what completion shows for `/claude`. */
+/** The sub-command list: this is what completion shows for `/cc`. */
 export function menuOptions(specs: readonly Spec[]): Option[] {
   return specs.map((s) => ({
     title: s.name,
@@ -417,7 +461,7 @@ const validNames = (options: readonly Option[], max = 8) => {
  * operator cancelled at some step, and nothing has been done.
  *
  * Optional arguments are asked only when `askOptional` (the operator came from
- * the picker); typed, they take their default so `/claude stats` just runs.
+ * the picker); typed, they take their default so `/cc-stats` just runs.
  */
 export async function walk(
   spec: Spec,
@@ -477,7 +521,7 @@ export async function walk(
 }
 
 /**
- * `/claude <input>`: parse, walk what is missing, run.
+ * `/cc <input>`, and every `/cc-<sub> <rest>` as `<sub> <rest>`: parse, walk what is missing, run.
  *
  * Nothing runs unless every argument was given or chosen, so escape at any step
  * leaves no side effect.
@@ -526,7 +570,7 @@ export async function dispatch(
   await commands.find((c) => c.name === spec.name)!.run(done)
 }
 
-/** One row per sub-command with its usage: what `/claude help` shows. */
+/** One row per sub-command with its usage: what `/cc-help` shows. */
 export function helpOptions(specs: readonly Spec[] = SPECS): Option[] {
   return specs.map((s) => ({
     title: usage(s),

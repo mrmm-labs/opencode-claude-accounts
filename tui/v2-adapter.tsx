@@ -283,6 +283,9 @@ function adapt(ctx: Context): TuiPluginApi {
           name: string
           title: string
           category?: string
+          description?: string
+          /** false: reachable by slash only, not listed in the palette. */
+          palette?: false
           slashName?: string
           /** Keep the slash command in the prompt and pass the typed rest to run. */
           slashArguments?: true
@@ -296,7 +299,8 @@ function adapt(ctx: Context): TuiPluginApi {
             id: c.name,
             title: c.title,
             ...(c.category ? { group: c.category } : {}),
-            palette: true as const,
+            ...(c.description ? { description: c.description } : {}),
+            ...(c.palette === false ? {} : { palette: true as const }),
             ...(c.slashName
               ? {
                   slash: {
@@ -320,7 +324,7 @@ function adapt(ctx: Context): TuiPluginApi {
 
 export function setupV2(ctx: Context, tui: TuiPlugin) {
   // Not wrapped in createRoot: a root of our own has no Keymap.Provider above
-  // it, so keymap.layer threw and no /claude command was ever registered. Setup
+  // it, so keymap.layer threw and no /cc command was ever registered. Setup
   // already runs under the host's owner, which also disposes what we register.
   void Promise.resolve(
     (tui as unknown as (api: TuiPluginApi, options: unknown) => unknown)(
