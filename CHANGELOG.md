@@ -35,6 +35,13 @@ Design decisions behind these changes are in [docs/adr](docs/adr/README.md); the
 * quota and reserve files are re-read only when they change; the usage index refresh went from about 10 ms to 0.3 ms
 * account profiles are fetched in parallel at start-up
 
+## [3.3.0](https://github.com/mrmm-labs/opencode-claude-accounts/compare/v3.2.0...v3.3.0) (2026-11-20)
+
+
+### Features
+
+* **tui:** lay out the Optimize sidebar section with hanging indents and grouped buttons ([#34](https://github.com/mrmm-labs/opencode-claude-accounts/issues/34)) ([97556fb](https://github.com/mrmm-labs/opencode-claude-accounts/commit/97556fbd219de5b4536de276864b0f3fb1aa2ab5))
+
 ## [3.2.0](https://github.com/mrmm-labs/opencode-claude-accounts/compare/v3.1.4...v3.2.0) (2026-11-19)
 
 
