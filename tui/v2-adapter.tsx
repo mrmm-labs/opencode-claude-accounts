@@ -284,7 +284,9 @@ function adapt(ctx: Context): TuiPluginApi {
           title: string
           category?: string
           slashName?: string
-          run: () => unknown
+          /** Keep the slash command in the prompt and pass the typed rest to run. */
+          slashArguments?: true
+          run: (input?: string) => unknown
         }>
         bindings?: Array<{ key: string; cmd: string }>
       }) {
@@ -295,10 +297,17 @@ function adapt(ctx: Context): TuiPluginApi {
             title: c.title,
             ...(c.category ? { group: c.category } : {}),
             palette: true as const,
-            ...(c.slashName ? { slash: { name: c.slashName } } : {}),
+            ...(c.slashName
+              ? {
+                  slash: {
+                    name: c.slashName,
+                    ...(c.slashArguments ? { arguments: true as const } : {}),
+                  },
+                }
+              : {}),
             bind: input.bindings?.find((b) => b.cmd === c.name)?.key ?? false,
-            run: () => {
-              void c.run()
+            run: (input?: string) => {
+              void c.run(input)
             },
           })),
           bindings: input.commands.map((c) => c.name),
@@ -311,7 +320,7 @@ function adapt(ctx: Context): TuiPluginApi {
 
 export function setupV2(ctx: Context, tui: TuiPlugin) {
   // Not wrapped in createRoot: a root of our own has no Keymap.Provider above
-  // it, so keymap.layer threw and no /cc-* command was ever registered. Setup
+  // it, so keymap.layer threw and no /claude command was ever registered. Setup
   // already runs under the host's owner, which also disposes what we register.
   void Promise.resolve(
     (tui as unknown as (api: TuiPluginApi, options: unknown) => unknown)(

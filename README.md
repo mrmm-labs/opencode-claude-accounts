@@ -558,24 +558,68 @@ touched at start-up and when a picker opens, never on the poll.
 
 ### Commands
 
-Every palette entry is titled `Claude › <Area> › <Verb>`, so the eight commands
-sort together under one vendor and group by what they touch — Accounts, Presets,
-Usage, Cache, Optimize, Diagnostics, Settings.
+One slash command, `/claude`, with a sub-command for everything the plugin
+does. OpenCode completes only a slash command's name, so the sub-commands are
+reached in two ways:
 
-| command        | title                                        | key         | what it is for                                                                                             |
-| -------------- | -------------------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------- |
-| `/cc-account`  | Claude › Accounts › Switch account or preset | `<leader>a` | choose a preset, Auto, or pin one account                                                                  |
-| `/cc-accounts` | Claude › Accounts › Manage accounts          | `<leader>A` | enable/disable, rename, assign IDs, set ceilings, presets                                                  |
-| `/cc-presets`  | Claude › Presets › Edit presets              |             | the preset editor on the Manage accounts menu                                                              |
-| `/cc-stats`    | Claude › Usage › Usage by session            | `<leader>s` | usage per session, last 24h                                                                                |
-| `/tokens`      | Claude › Usage › Token usage                 |             | per-session token breakdown and the fix report                                                             |
-| `/cc-cache`    | Claude › Cache › Review impact and settings  |             | hit rate, cost saved, misses by cause; change cacheTtl, contextEditing, bindBy, strategy, capMode in place |
-| `/optimize`    | Claude › Optimize › Ranked fixes             |             | ask the agent for a fix plan                                                                               |
-| `/cc-debug`    | Claude › Diagnostics › Explain routing       |             | what the balancer is actually doing, right now                                                             |
-| `/cc-requests` | Claude › Diagnostics › Recent requests       |             | the last 24h of requests; open one to see the path it took                                                 |
-| `/cc-config`   | Claude › Settings › Edit settings            | `<leader>c` | the settings that apply without a restart                                                                  |
+- `/claude` alone lists every sub-command in a searchable picker. Picking one
+  asks for each argument it still needs, again as a searchable picker with the
+  live values (account names, preset names, settings) or a prompt for free
+  text. Escape at any step cancels with nothing done.
+- Typing it out is the fast path: `/claude switch work`. A prefix is enough when
+  it is unique (`/claude sw`); an ambiguous one (`/claude s`) opens the picker
+  with only the matches. A known sub-command with missing arguments asks for
+  just those, and a value that matches nothing lists the valid ones and asks
+  again. Optional arguments take their default when typed and are offered when
+  you came through the picker.
 
-### /cc-account
+Windows are `1h`, `6h`, `24h` (the default) and `7d`.
+
+<!-- commands:start -->
+
+| Command                                         | What it does                                                           |
+| ----------------------------------------------- | ---------------------------------------------------------------------- |
+| `/claude switch <account\|preset\|auto\|clear>` | choose a preset, Auto, or pin one account                              |
+| `/claude accounts`                              | enable or disable, rename, assign IDs, set ceilings, edit presets      |
+| `/claude presets`                               | the preset editor on the Manage accounts menu                          |
+| `/claude credits <allow\|decline>`              | allow or decline spending paid overflow in this session                |
+| `/claude reserve <on\|off>`                     | let this session spend accounts past their ceiling                     |
+| `/claude stats [1h\|6h\|24h\|7d]`               | usage per session over a window                                        |
+| `/claude tokens`                                | per-session token breakdown and the fix report                         |
+| `/claude cache [1h\|6h\|24h\|7d]`               | hit rate, cost saved, misses by cause; change cacheTtl, contextEditing |
+| `/claude optimize`                              | ask the agent for a fix plan                                           |
+| `/claude debug`                                 | what the balancer is actually doing, right now                         |
+| `/claude requests [1h\|6h\|24h\|7d]`            | requests over a window; open one to see the path it took               |
+| `/claude config <setting> <value>`              | change a setting that applies without a restart                        |
+| `/claude help`                                  | every sub-command with its usage                                       |
+
+<!-- commands:end -->
+
+The palette entries (`Claude › <Area> › <Verb>`) and the `<leader>` keys stay:
+`<leader>a` switches account, `<leader>A` manages accounts, `<leader>s` shows
+usage by session and `<leader>c` edits settings.
+
+#### Migrating from the `/cc-*` commands
+
+Every old command is a sub-command of `/claude`; the old names no longer exist.
+
+| was            | now                |
+| -------------- | ------------------ |
+| `/cc-account`  | `/claude switch`   |
+| `/cc-accounts` | `/claude accounts` |
+| `/cc-presets`  | `/claude presets`  |
+| `/cc-stats`    | `/claude stats`    |
+| `/tokens`      | `/claude tokens`   |
+| `/cc-cache`    | `/claude cache`    |
+| `/optimize`    | `/claude optimize` |
+| `/cc-debug`    | `/claude debug`    |
+| `/cc-requests` | `/claude requests` |
+| `/cc-config`   | `/claude config`   |
+
+The two per-session toggles that lived in the account picker are now
+`/claude credits` and `/claude reserve` (they are still in the picker, too).
+
+### /claude switch
 
 Presets, then Auto, then the individual accounts, each with its quota. Picking
 one writes the selection file and nothing else -- no `authorize()`, no
@@ -592,7 +636,7 @@ The agent's `claude_accounts_use_reserve` tool can turn the override off, but tu
 on is refused unless `agentReserve: true` is set: reserved quota may be a
 teammate's share, so spending it is the operator's call by default.
 
-### /cc-accounts
+### /claude accounts
 
 - **Accounts in use** -- each row shows the account's **ID first, then its
   display name**, with a used-vs-ceiling bar per window and a `reserved` marker
@@ -615,9 +659,9 @@ teammate's share, so spending it is the operator's call by default.
   resolves them, so a hand-written `"Acme 1"` is understood and preserved;
   references that resolve to nothing are listed as `[?]` and can be removed.
 
-### /cc-requests
+### /claude requests
 
-The requests of the last 24 hours, newest first: time, account, model, status,
+The requests of the chosen window (24 hours by default), newest first: time, account, model, status,
 tokens, cache share and duration, with a flag when something unusual happened
 (`rotated`, `all spent`, `prefill fixed`, `re-auth`, `feature dropped`). It opens
 on the current session; the first row switches to all sessions.
@@ -629,9 +673,9 @@ and the account's quota after it. These are the steps of the request-flow
 diagram in [docs/architecture.md](docs/architecture.md). Requests logged before
 this version show no path.
 
-### /cc-cache
+### /claude cache
 
-Cache efficiency over the last 24h, as one block per account and per session:
+Cache efficiency over the window (24h by default), as one block per account and per session:
 hit rate, cache reads / writes / uncached input, and the top miss causes
 (account switch, TTL expired, prefix change, …) with the tokens each rewrote.
 The figures come from the usage log's per-request token counts, which the quota
@@ -654,7 +698,7 @@ what it did — e.g. how many requests went out with 1h markers or with context
 editing. Selecting a setting row changes it in place; it is live within the
 config reload interval.
 
-### /cc-config
+### /claude config
 
 The settings in four sections -- Balancing, Quota, Tokens, Diagnostics --
 each row carrying its label, current value, description and config key, so
@@ -669,9 +713,9 @@ would write `switchAt: "abc"` as 0.95 while reporting success.
 Keys that need a restart are not offered at all. An editor that appears to work
 and changes nothing until restart is worse than no editor.
 
-### /cc-stats
+### /claude stats
 
-Sessions from the last 24 hours, newest first. Selecting one opens its detail:
+Sessions from the window (24 hours by default), newest first. Selecting one opens its detail:
 rate as well as count, failures broken down by status, the slowest request
 alongside the average, per-account share, and how far each account's 5h window
 moved while it ran.
@@ -715,8 +759,8 @@ by the account list. The rest read something:
 
 | strategy                     | parameter                      | where                               |
 | ---------------------------- | ------------------------------ | ----------------------------------- |
-| `sticky`                     | `switchAt`, `switchWindow`     | `/cc-config` -> Balancing           |
-| `least-loaded`, `least-used` | `switchWindow`, `quotaMaxAge`  | `/cc-config`                        |
+| `sticky`                     | `switchAt`, `switchWindow`     | `/claude config` -> Balancing       |
+| `least-loaded`, `least-used` | `switchWindow`, `quotaMaxAge`  | `/claude config`                    |
 | `priority`                   | the order of the accounts list | the order they appear in `accounts` |
 | `weighted`                   | `weights`, per account         | the preset, or top level            |
 
@@ -757,7 +801,7 @@ A preset may override `strategy`, `weights`, `autoSwitch`, `switchAt`,
 weights -- one rule, no exceptions to remember. Its own weights _replace_ the
 defaults rather than merging, so the ratio can be read from the preset alone.
 
-`/cc-accounts` -> a preset shows each of these with its value and whether the
+`/claude accounts` -> a preset shows each of these with its value and whether the
 preset set it or inherited it. That distinction matters: "Switch at: 0.95"
 alone cannot tell a deliberate 0.95 from an inherited one, and the two diverge
 the moment the default changes. Every knob can be cleared back to inheriting.

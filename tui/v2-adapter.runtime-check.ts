@@ -178,20 +178,62 @@ for (const render of slots) {
   }
 }
 assert.ok(slots.length >= 3, `expected sidebar slots, got ${slots.length}`)
-assert.ok(
-  layer.commands.some((c: any) => c.slash?.name === "optimize"),
-  "/optimize registered",
+// One slash entry, /claude, which keeps its typed arguments.
+const slashed = layer.commands.filter((c: any) => c.slash)
+assert.deepEqual(
+  slashed.map((c: any) => c.slash),
+  [{ name: "claude", arguments: true }],
+  "exactly one slash entry",
 )
-await layer.commands.find((c: any) => c.slash?.name === "optimize").run()
+const claude = slashed[0]
+
+// Bare /claude lists every sub-command with its usage; escape does nothing.
+pick = undefined
+await claude.run("")
+await new Promise((r) => setTimeout(r, 20))
+const subs = dialogOptions.map((o: any) => o.title)
+assert.deepEqual(
+  [
+    "switch",
+    "accounts",
+    "stats",
+    "tokens",
+    "cache",
+    "optimize",
+    "config",
+  ].filter((n) => !subs.includes(n)),
+  [],
+  "sub-commands listed",
+)
+assert.match(
+  (dialogOptions.find((o: any) => o.title === "switch") as any).footer,
+  /^\/claude switch </,
+)
+// An unknown name toasts and still offers the list.
+await claude.run("zzz")
+await new Promise((r) => setTimeout(r, 20))
+assert.ok(toasts.some((t) => /Unknown sub-command "zzz"/.test(t)))
+// A known sub-command with a missing argument asks for it, with live values.
+await claude.run("switch")
+await new Promise((r) => setTimeout(r, 20))
+assert.ok(
+  dialogOptions.some((o: any) => o.value === "__auto__"),
+  "switch offers auto",
+)
+assert.ok(
+  dialogOptions.some((o: any) => o.value === "__clear__"),
+  "switch offers clear",
+)
+assert.equal(prompts.length, 1, "cancelled walks sent nothing")
+
+await claude.run("optimize")
 await new Promise((r) => setTimeout(r, 50))
-assert.equal(prompts.length, 2, "/optimize sent one prompt")
+assert.equal(prompts.length, 2, "/claude optimize sent one prompt")
 assert.match((prompts[1] as { text: string }).text, /Token optimisation report/)
-// /tokens: the dialog lists actions and every report row; "paste" copies the full
+// tokens: the dialog lists actions and every report row; "paste" copies the full
 // report and fires the TUI's own paste command.
-const tokens = layer.commands.find((c: any) => c.slash?.name === "tokens")
-assert.ok(tokens, "/tokens registered")
 pick = "paste"
-await tokens.run()
+await claude.run("tokens")
 await new Promise((r) => setTimeout(r, 120))
 assert.deepEqual(
   dialogOptions.slice(0, 3).map((o) => o.value),
@@ -206,7 +248,7 @@ assert.match(readF(`${bin}/clipboard`, "utf-8"), /Token optimisation report/)
 assert.deepEqual(failures, [])
 
 console.log(
-  `plugin setup through adapter: ok (${slots.length} slots, /optimize sent, /tokens pastes ${dialogOptions.length} rows)`,
+  `plugin setup through adapter: ok (${slots.length} slots, /claude optimize sent, /claude tokens pastes ${dialogOptions.length} rows)`,
 )
 // The plugin keeps refresh timers running; nothing else to wait for.
 process.exit(0)

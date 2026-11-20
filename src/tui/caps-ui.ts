@@ -34,6 +34,7 @@ export type Area =
   | "Optimize"
   | "Diagnostics"
   | "Settings"
+  | "Commands"
 
 /** `Claude › Accounts › Manage accounts`. One speller, so every title agrees. */
 export function paletteTitle(area: Area, verb: string): string {
@@ -290,7 +291,7 @@ export function breakdownRows(s: CacheSummary): Row[] {
 }
 
 /**
- * The /cc-cache sections: all accounts, each account in `order` (ids as
+ * The /claude cache sections: all accounts, each account in `order` (ids as
  * configured; any other account seen after), and this session when given.
  */
 export function cacheBreakdownBlocks(
