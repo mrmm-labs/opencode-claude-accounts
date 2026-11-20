@@ -93,6 +93,12 @@ Three families of pure builders sit beside chip.ts, each tested there:
   traffic.ts (which ranks by raw token weight); its output is the "Ranked fixes"
   section of the token report.
 
+The Optimize sidebar section is laid out by `optimize-layout.ts`: `optimizeView`
+decides what it says, `layoutOptimize` / `layoutButtons` place it for a width.
+Labels are a fixed column and wrapped values hang under the value column. The
+buttons sit on one row when they fit, else wrap as whole groups, primary first.
+The TUI measures its own box for the width, since the slot gives none.
+
 Every palette command is titled through `paletteTitle(area, verb)`
 (`Claude › <Area> › <Verb>`), and a result toast through `toastResult(thing,
 result, reason)` (`Preset rr-12 not saved: name already used`).
