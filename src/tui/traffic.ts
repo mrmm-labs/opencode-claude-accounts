@@ -191,7 +191,7 @@ export function hints(h: HintInput, max = 5): Row[] {
     add(
       d.tokens * 10,
       "duplicate",
-      // Short for the sidebar; the full paths are in the /claude tokens report.
+      // Short for the sidebar; the full paths are in the /cc-tokens report.
       `${base(d.paths[0]!)} ×${d.paths.length}: ~${si(d.tokens)}/turn, keep one`,
     )
   const c = h.composition
@@ -211,7 +211,7 @@ export function hints(h: HintInput, max = 5): Row[] {
         "instructions",
         big.length
           ? `~${si(c.instructions)}/turn, biggest: ${big.join(", ")}`
-          : `~${si(c.instructions)}/turn: see /claude tokens`,
+          : `~${si(c.instructions)}/turn: see /cc-tokens`,
       )
     }
     if (c.injected > 15_000)
@@ -324,7 +324,7 @@ export type ReportInput = HintInput & {
   sections: { title: string; rows: Row[] }[]
 }
 
-/** The message /claude optimize sends: the numbers, then a precise ask. */
+/** The message /cc-optimize sends: the numbers, then a precise ask. */
 export function optimizeReport(r: ReportInput): string {
   const lines = [
     `Token optimisation report for this OpenCode setup (directory: ${r.directory}).`,

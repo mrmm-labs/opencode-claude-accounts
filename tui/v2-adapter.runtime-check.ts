@@ -178,16 +178,33 @@ for (const render of slots) {
   }
 }
 assert.ok(slots.length >= 3, `expected sidebar slots, got ${slots.length}`)
-// One slash entry, /claude, which keeps its typed arguments.
+// 1 + N slash entries: /cc and one /cc-<sub> per registry entry, all keeping
+// their typed arguments, names unique.
+const { SPECS } = await import("../src/tui/commands.ts")
 const slashed = layer.commands.filter((c: any) => c.slash)
+const want = ["cc", ...SPECS.map((s: any) => `cc-${s.name}`)]
 assert.deepEqual(
   slashed.map((c: any) => c.slash),
-  [{ name: "claude", arguments: true }],
-  "exactly one slash entry",
+  want.map((name) => ({ name, arguments: true })),
+  "/cc plus one /cc-<sub> per registry entry",
+)
+assert.equal(new Set(want).size, want.length, "slash names are unique")
+for (const s of SPECS as any[]) {
+  const c = slashed.find((x: any) => x.slash.name === `cc-${s.name}`)
+  assert.ok(c.description.includes(`/cc-${s.name}`), `${s.name} shows usage`)
+  assert.ok(!c.palette, `${s.name} is slash-only: the palette has its own`)
+}
+const palette = layer.commands.filter((c: any) => c.palette)
+assert.equal(
+  new Set(palette.map((c: any) => c.title)).size,
+  palette.length,
+  "no duplicate palette entries",
 )
 const claude = slashed[0]
+const sub = (name: string) =>
+  slashed.find((c: any) => c.slash.name === `cc-${name}`)
 
-// Bare /claude lists every sub-command with its usage; escape does nothing.
+// Bare /cc lists every sub-command with its usage; escape does nothing.
 pick = undefined
 await claude.run("")
 await new Promise((r) => setTimeout(r, 20))
@@ -207,7 +224,14 @@ assert.deepEqual(
 )
 assert.match(
   (dialogOptions.find((o: any) => o.title === "switch") as any).footer,
-  /^\/claude switch </,
+  /^\/cc-switch </,
+)
+// A sub-command entry runs like /cc <sub> <rest>: missing args walk the picker.
+await sub("switch").run("")
+await new Promise((r) => setTimeout(r, 20))
+assert.ok(
+  dialogOptions.some((o: any) => o.value === "__auto__"),
+  "/cc-switch offers auto",
 )
 // An unknown name toasts and still offers the list.
 await claude.run("zzz")
@@ -226,14 +250,14 @@ assert.ok(
 )
 assert.equal(prompts.length, 1, "cancelled walks sent nothing")
 
-await claude.run("optimize")
+await sub("optimize").run("")
 await new Promise((r) => setTimeout(r, 50))
-assert.equal(prompts.length, 2, "/claude optimize sent one prompt")
+assert.equal(prompts.length, 2, "/cc-optimize sent one prompt")
 assert.match((prompts[1] as { text: string }).text, /Token optimisation report/)
 // tokens: the dialog lists actions and every report row; "paste" copies the full
 // report and fires the TUI's own paste command.
 pick = "paste"
-await claude.run("tokens")
+await sub("tokens").run("")
 await new Promise((r) => setTimeout(r, 120))
 assert.deepEqual(
   dialogOptions.slice(0, 3).map((o) => o.value),
@@ -248,7 +272,7 @@ assert.match(readF(`${bin}/clipboard`, "utf-8"), /Token optimisation report/)
 assert.deepEqual(failures, [])
 
 console.log(
-  `plugin setup through adapter: ok (${slots.length} slots, /claude optimize sent, /claude tokens pastes ${dialogOptions.length} rows)`,
+  `plugin setup through adapter: ok (${slots.length} slots, /cc-optimize sent, /cc-tokens pastes ${dialogOptions.length} rows)`,
 )
 // The plugin keeps refresh timers running; nothing else to wait for.
 process.exit(0)

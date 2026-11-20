@@ -291,7 +291,7 @@ export function breakdownRows(s: CacheSummary): Row[] {
 }
 
 /**
- * The /claude cache sections: all accounts, each account in `order` (ids as
+ * The /cc-cache sections: all accounts, each account in `order` (ids as
  * configured; any other account seen after), and this session when given.
  */
 export function cacheBreakdownBlocks(

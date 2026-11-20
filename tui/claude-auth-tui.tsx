@@ -125,6 +125,7 @@ import {
   dispatch,
   helpOptions,
   SLASH,
+  slashEntries,
   windowMs,
   type Args,
   type CommandName,
@@ -811,7 +812,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
   }
 
   type Section = { title: string; note?: string; rows: Row[] }
-  // One source for the sidebar, the new-session toast and /claude optimize, so all three agree.
+  // One source for the sidebar, the new-session toast and /cc-optimize, so all three agree.
   const report = (id: string): Section[] => {
     const messages = api.state.session.messages(id)
     const totals = sessionTotals(messages)
@@ -831,7 +832,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
     return [
       {
         title: "Optimize",
-        note: "(biggest first, /claude optimize)",
+        note: "(biggest first, /cc-optimize)",
         rows: advice,
       },
       {
@@ -878,7 +879,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
     ]
   }
 
-  // The full report: what /claude optimize sends and what /claude tokens copies.
+  // The full report: what /cc-optimize sends and what /cc-tokens copies.
   const reportText = (id: string) => {
     const directory = sessionDir(id)
     const setup = setupOf(directory)
@@ -980,7 +981,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
         category: "Actions",
       },
       {
-        title: "Ask the agent for a fix plan (/claude optimize)",
+        title: "Ask the agent for a fix plan (/cc-optimize)",
         value: "optimize",
         category: "Actions",
       },
@@ -1038,7 +1039,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
         worth
           .slice(0, 2)
           .map((r) => `${r.label.trim()}: ${r.value}`)
-          .join("\n") + "\nRun /claude optimize for a fix plan.",
+          .join("\n") + "\nRun /cc-optimize for a fix plan.",
       duration: 10_000,
     })
   }
@@ -1502,7 +1503,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
     slots: {
       sidebar_content(_ctx, props: { session_id: string }) {
         // Short on purpose: the top fixes and one line of usage. Everything else is
-        // in /claude tokens, which can paste it into the prompt.
+        // in /cc-tokens, which can paste it into the prompt.
         const view = () => {
           const id = props.session_id
           const c = compoOf(id)
@@ -1607,7 +1608,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
     },
   })
 
-  // The palette entries, each runnable on its own. `/claude` reaches the same
+  // The palette entries, each runnable on its own. `/cc` reaches the same
   // functions with parsed arguments; the palette passes none.
   type Entry = {
     name: string
@@ -1816,7 +1817,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
           if (!sid) {
             api.ui.toast({
               variant: "warning",
-              message: "Open a session first, then run /claude optimize.",
+              message: "Open a session first, then run /cc-optimize.",
             })
             return
           }
@@ -1833,7 +1834,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
           if (!sid) {
             api.ui.toast({
               variant: "warning",
-              message: "Open a session first, then run /claude tokens.",
+              message: "Open a session first, then run /cc-tokens.",
             })
             return
           }
@@ -3582,7 +3583,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
             ))
           }
 
-          // `/claude config <setting> <value>` arrives with both chosen.
+          // `/cc-config <setting> <value>` arrives with both chosen.
           const typed = input?.setting
           const typedValue = input?.value
           const meta = EDITABLE.find((e) => e.key === typed)
@@ -3788,30 +3789,29 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
     config: (a) => entry("config").run(a),
     help: () =>
       api.ui.dialog.replace(() => (
-        <api.ui.DialogSelect title="/claude commands" options={helpOptions()} />
+        <api.ui.DialogSelect title="/cc commands" options={helpOptions()} />
       )),
   }
   const commands = commandsWith(runs)
+  const forward = (input: string) =>
+    dispatch(input, { commands, live, io: dialogs })
 
   api.keymap.registerLayer({
     commands: [
       ...palette.commands.map((e) => ({ ...e, run: () => e.run() })),
       {
         name: "claude-auth.command",
-        title: paletteTitle("Commands", "Open /claude"),
+        title: paletteTitle("Commands", "Open /cc"),
         category: "Claude Auth",
         namespace: "palette",
-        // The only slash entry: the host completes this name and hands the
-        // rest of the line to run, which picks or parses the sub-command.
+        // The host completes only a name, so the bare `/cc` is the picker and
+        // each sub-command also has its own `/cc-<name>` entry below.
         slashName: SLASH,
         slashArguments: true,
         run: (input?: unknown) =>
-          dispatch(typeof input === "string" ? input : "", {
-            commands,
-            live,
-            io: dialogs,
-          }),
+          forward(typeof input === "string" ? input : ""),
       },
+      ...slashEntries(commands, forward),
     ],
     bindings: palette.bindings,
   })

@@ -10,7 +10,10 @@ import {
   matchOption,
   menuOptions,
   parse,
+  SLASH,
   SPECS,
+  slashDescription,
+  slashEntries,
   usage,
   walk,
   windowMs,
@@ -304,7 +307,7 @@ describe("walk", () => {
 })
 
 describe("dispatch", () => {
-  it("lists the sub-commands for /claude, then walks the picked one's arguments", async () => {
+  it("lists the sub-commands for /cc, then walks the picked one's arguments", async () => {
     const { commands, ran } = registry()
     const d = fakeDialogs(["switch", "__auto__"])
     await dispatch("", { commands, live, io: d.io })
@@ -316,7 +319,7 @@ describe("dispatch", () => {
     )
     assert.equal(
       menu.options[0]!.footer,
-      "/claude switch <account|preset|auto|clear>",
+      "/cc-switch <account|preset|auto|clear>",
     )
     assert.ok(menu.options.every((o) => o.category && o.description))
     assert.deepEqual(ran, [{ name: "switch", args: { target: "__auto__" } }])
@@ -394,7 +397,7 @@ describe("dispatch", () => {
     assert.deepEqual(ran, [])
     assert.match(
       (d.calls[0] as { message: string }).message,
-      /Usage: \/claude tokens$/,
+      /Usage: \/cc-tokens$/,
     )
   })
 
@@ -416,10 +419,10 @@ describe("registry", () => {
   it("has unique names and a usage line each", () => {
     const names = SPECS.map((s) => s.name)
     assert.equal(new Set(names).size, names.length)
-    for (const s of SPECS) assert.match(usage(s), /^\/claude [a-z]+/)
+    for (const s of SPECS) assert.match(usage(s), /^\/cc-[a-z]+/)
     assert.equal(
       usage(SPECS.find((s) => s.name === "stats")!),
-      "/claude stats [1h|6h|24h|7d]",
+      "/cc-stats [1h|6h|24h|7d]",
     )
   })
 
@@ -481,13 +484,95 @@ describe("registry", () => {
     )
   })
 
-  it("registers exactly one slash entry, and it keeps its arguments", () => {
+  it("hand-writes one slash entry (/cc); every other one is generated", () => {
     const tui = readFileSync(
       new URL("../../tui/claude-auth-tui.tsx", import.meta.url),
       "utf-8",
     )
     assert.equal(tui.match(/slashName:\s/g)?.length, 1)
     assert.match(tui, /slashName: SLASH,\s+slashArguments: true,/)
+    assert.match(tui, /\.\.\.slashEntries\(commands, forward\)/)
     assert.equal(tui.match(/\bslash:\s*\{/g), null)
+  })
+})
+
+describe("slashEntries", () => {
+  const forwarded: string[] = []
+  const entries = slashEntries(SPECS, (input) => void forwarded.push(input))
+
+  it("has one entry per registry entry, in order, with unique /cc-<name> names", () => {
+    assert.deepEqual(
+      entries.map((e) => e.slashName),
+      SPECS.map((s) => `cc-${s.name}`),
+    )
+    assert.equal(new Set(entries.map((e) => e.slashName)).size, SPECS.length)
+    assert.equal(new Set(entries.map((e) => e.name)).size, SPECS.length)
+    assert.ok(!entries.some((e) => e.slashName === SLASH))
+    assert.equal(SLASH, "cc")
+  })
+
+  it("keeps the typed rest, and stays out of the palette", () => {
+    for (const e of entries) {
+      assert.equal(e.slashArguments, true)
+      assert.equal(e.palette, false)
+    }
+  })
+
+  it("shows what each does and its usage in the host's list", () => {
+    for (const [i, s] of SPECS.entries()) {
+      const e = entries[i]!
+      assert.equal(e.title, s.title)
+      assert.equal(e.description, slashDescription(s))
+      assert.ok(e.description.endsWith(usage(s)), e.description)
+      assert.ok(e.description.includes(`/cc-${s.name}`))
+    }
+    assert.equal(
+      entries[0]!.description,
+      "switch account or preset \u00b7 /cc-switch <account|preset|auto|clear>",
+    )
+  })
+
+  it("forwards <name> <rest> to the dispatch", () => {
+    forwarded.length = 0
+    entries.find((e) => e.slashName === "cc-switch")!.run("work")
+    entries.find((e) => e.slashName === "cc-stats")!.run("")
+    entries.find((e) => e.slashName === "cc-tokens")!.run(undefined)
+    entries.find((e) => e.slashName === "cc-config")!.run("strategy least-used")
+    assert.deepEqual(forwarded, [
+      "switch work",
+      "stats",
+      "tokens",
+      "config strategy least-used",
+    ])
+  })
+
+  it("treats a host context object as no input", () => {
+    forwarded.length = 0
+    entries[0]!.run({ some: "context" })
+    assert.deepEqual(forwarded, ["switch"])
+  })
+
+  it("runs exactly like /cc <sub> <rest>: typed runs, missing walks", async () => {
+    const run = async (input: string, answers: (string | undefined)[]) => {
+      const { commands, ran } = registry()
+      const d = fakeDialogs(answers)
+      const entry = slashEntries(commands, (i) =>
+        dispatch(i, { commands, live, io: d.io }),
+      ).find((e) => e.slashName === "cc-switch")!
+      await entry.run(input)
+      return { ran, calls: d.calls }
+    }
+    const typed = await run("auto", [])
+    assert.deepEqual(typed.calls, [])
+    assert.deepEqual(typed.ran, [
+      { name: "switch", args: { target: "__auto__" } },
+    ])
+
+    const walked = await run("", ["s2"])
+    assert.deepEqual(kinds(walked.calls), ["select", "close"])
+    assert.deepEqual(walked.ran, [{ name: "switch", args: { target: "s2" } }])
+
+    const cancelled = await run("", [undefined])
+    assert.deepEqual(cancelled.ran, [])
   })
 })
