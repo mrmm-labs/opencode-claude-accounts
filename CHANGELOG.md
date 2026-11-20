@@ -35,6 +35,17 @@ Design decisions behind these changes are in [docs/adr](docs/adr/README.md); the
 * quota and reserve files are re-read only when they change; the usage index refresh went from about 10 ms to 0.3 ms
 * account profiles are fetched in parallel at start-up
 
+## [5.0.0](https://github.com/mrmm-labs/opencode-claude-accounts/compare/v4.0.0...v5.0.0) (2026-11-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* /claude is removed, with no alias. Use /cc-<sub> or /cc <sub>. Renamed in 4.0: /cc-account is now /cc-switch, /tokens is /cc-tokens, /optimize is /cc-optimize.
+
+### Features
+
+* bring back /cc and add a /cc-&lt;sub&gt; slash entry per sub-command ([#38](https://github.com/mrmm-labs/opencode-claude-accounts/issues/38)) ([ede63fc](https://github.com/mrmm-labs/opencode-claude-accounts/commit/ede63fcb103915a32efc022a5001a50852cc923d))
+
 ## [4.0.0](https://github.com/mrmm-labs/opencode-claude-accounts/compare/v3.3.0...v4.0.0) (2026-11-20)
 
 
