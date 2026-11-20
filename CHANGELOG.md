@@ -35,6 +35,17 @@ Design decisions behind these changes are in [docs/adr](docs/adr/README.md); the
 * quota and reserve files are re-read only when they change; the usage index refresh went from about 10 ms to 0.3 ms
 * account profiles are fetched in parallel at start-up
 
+## [4.0.0](https://github.com/mrmm-labs/opencode-claude-accounts/compare/v3.3.0...v4.0.0) (2026-11-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* /cc-account, /cc-accounts, /cc-presets, /cc-stats, /cc-cache, /cc-debug, /cc-requests, /cc-config, /tokens and /optimize are removed. Use /claude switch, accounts, presets, stats, cache, debug, requests, config, tokens and optimize. Palette entries and keybinds are unchanged.
+
+### Features
+
+* replace the /cc-* slash commands with one /claude command ([#36](https://github.com/mrmm-labs/opencode-claude-accounts/issues/36)) ([d53e70d](https://github.com/mrmm-labs/opencode-claude-accounts/commit/d53e70ddfb96fd3a2f0da07898536822dedfe603))
+
 ## [3.3.0](https://github.com/mrmm-labs/opencode-claude-accounts/compare/v3.2.0...v3.3.0) (2026-11-20)
 
 
