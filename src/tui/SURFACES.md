@@ -59,7 +59,7 @@ one answered. Cost increases down the list, so the order is the policy.
 
 `useCredits: false` removes the `credits` tier entirely, so a spent account is
 simply spent and the plugin stops rather than bills. A single session can
-decline on its own -- a row in `/cc-account`, under "This session" -- which
+decline on its own -- a row in `/claude switch`, under "This session" -- which
 narrows only that session's view while the global setting still governs the
 rest. Neither turns
 credits off at Anthropic -- no API offers that, and this credential could not
@@ -69,6 +69,36 @@ free while another client on the same account still spends.
 `credits` sits below both free tiers deliberately: a free account at 98% is
 cheaper than a paid one at 100%, and enabling credits must not start spending
 them while any free headroom remains.
+
+## The `/claude` command (src/tui/commands.ts)
+
+One slash entry, `/claude`, registered with `arguments: true` so the host keeps
+the typed rest and passes it to `run`. The host completes only the name, so
+sub-commands and their arguments are completed by a chain of searchable
+pickers: `SPECS` is the single registry (name, title, description, category,
+args), and parsing, the pickers, `/claude help` and the README table all read
+it. The TUI binds each name to its handler with an exhaustive
+`Record<CommandName, Run>`, so a sub-command added to `SPECS` without a handler
+does not compile.
+
+- **Parse** -- `parse` reads `name arg...` against the registry: an exact name,
+  else a unique prefix; an ambiguous prefix is a menu of its matches, an unknown
+  word a menu of everything. An argument is matched exactly, then by unique
+  prefix, then by unique fragment over its value, title and aliases (an account
+  matches by label, display name or email). The last argument may take the rest
+  of the line.
+- **Walk** -- `walk` asks only for what is missing: `enum` arguments as a select
+  of live values with the current one marked, `text` as a prompt prefilled with
+  its default. Optional arguments take their default when typed and are asked
+  when the operator came through the picker. A typed value that matches nothing
+  toasts the valid ones and reopens that picker, narrowed to what it could have
+  meant. Escape at any step returns `undefined` and nothing runs.
+- **Hosts** -- OpenCode 2 gets `slash: { name, arguments: true }` from the
+  adapter. The V1 host may not pass the typed rest; `run` then gets no input and
+  `/claude` is the picker alone.
+
+The palette entries and `<leader>` keys are unchanged and call the same
+functions with no arguments.
 
 ## Caps, cache and advice (src/tui/caps-ui.ts)
 
@@ -81,7 +111,7 @@ Three families of pure builders sit beside chip.ts, each tested there:
   `presets.<name>.maxUsage.<id>` (per preset).
 - **Cache** -- `toCacheRows` turns usage-log request rows into the shape
   `cacheStats` (src/balance/cache-stats.ts) classifies; `cacheViewRows` totals
-  it per account and per session and labels each miss by cause. `/cc-cache`
+  it per account and per session and labels each miss by cause. `/claude cache`
   renders it. Prefix hashes are joined from the shape log when present; today it
   carries none, so classification falls back to account/model/TTL signals.
   `cacheImpact` adds the cost side and per-session miss causes;
@@ -140,14 +170,14 @@ no header carries a balance. It is called unconditionally -- the freshness gate
 is a ten-minute debounce and the 429 backoff is the endpoint's own guard, so a
 third check here would only be a slower way to the same answer.
 
-Manual: `/cc-accounts` -> "Refresh quota and credits now" ignores the freshness
-gate for every account, and `/cc-debug` does the same before reporting. Neither
+Manual: `/claude accounts` -> "Refresh quota and credits now" ignores the freshness
+gate for every account, and `/claude debug` does the same before reporting. Neither
 can ignore the rate limit; when refused, the toast says the figures are the
 last ones reported rather than pretending they are current.
 
 ## Asking what it is doing
 
-`/cc-debug` re-reads config, accounts and quota from disk, forces a probe
+`/claude debug` re-reads config, accounts and quota from disk, forces a probe
 ignoring both the freshness gate and the 429 backoff, then writes
 `~/.local/share/opencode/claude-auth/report.txt` and shows it. It reports FACTS
 READ AT CALL TIME, never intent: the running build, what the cache holds per
@@ -167,7 +197,7 @@ originals. `api.command.register` and `event.on` do return unsubscribes, but
 slots do not, and slots are half the surface. Code changes need a restart.
 
 Data does not: config, presets, the selection file and the quota cache are all
-re-read, and `/cc-debug` forces that immediately.
+re-read, and `/claude debug` forces that immediately.
 
 ## Two processes, one plugin
 

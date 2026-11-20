@@ -39,7 +39,9 @@ import {
 } from "node:fs"
 
 import {
+  AUTO_SOURCE,
   loadPersistedAccountSource,
+  PRESET_PREFIX,
   refreshAccountsList,
   saveAccountSource,
 } from "../dist/credentials.js"
@@ -117,6 +119,20 @@ import {
   type RequestLike,
   type ShapeLike as CacheShape,
 } from "../dist/tui/caps-ui.js"
+import {
+  commandsWith,
+  DEFAULT_WINDOW,
+  dispatch,
+  helpOptions,
+  SLASH,
+  windowMs,
+  type Args,
+  type CommandName,
+  type Dialogs,
+  type Live,
+  type Run,
+  type Variant,
+} from "../dist/tui/commands.js"
 import {
   collapsedLine,
   layoutButtons,
@@ -795,7 +811,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
   }
 
   type Section = { title: string; note?: string; rows: Row[] }
-  // One source for the sidebar, the new-session toast and /optimize, so all three agree.
+  // One source for the sidebar, the new-session toast and /claude optimize, so all three agree.
   const report = (id: string): Section[] => {
     const messages = api.state.session.messages(id)
     const totals = sessionTotals(messages)
@@ -813,7 +829,11 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
     })
     const ranked = rankedFixes(id, c)
     return [
-      { title: "Optimize", note: "(biggest first, /optimize)", rows: advice },
+      {
+        title: "Optimize",
+        note: "(biggest first, /claude optimize)",
+        rows: advice,
+      },
       {
         title: "Forecast",
         note: "(per account, ours vs outside)",
@@ -858,7 +878,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
     ]
   }
 
-  // The full report: what /optimize sends and what /tokens copies.
+  // The full report: what /claude optimize sends and what /claude tokens copies.
   const reportText = (id: string) => {
     const directory = sessionDir(id)
     const setup = setupOf(directory)
@@ -960,7 +980,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
         category: "Actions",
       },
       {
-        title: "Ask the agent for a fix plan (/optimize)",
+        title: "Ask the agent for a fix plan (/claude optimize)",
         value: "optimize",
         category: "Actions",
       },
@@ -1018,7 +1038,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
         worth
           .slice(0, 2)
           .map((r) => `${r.label.trim()}: ${r.value}`)
-          .join("\n") + "\nRun /optimize for a fix plan.",
+          .join("\n") + "\nRun /claude optimize for a fix plan.",
       duration: 10_000,
     })
   }
@@ -1482,7 +1502,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
     slots: {
       sidebar_content(_ctx, props: { session_id: string }) {
         // Short on purpose: the top fixes and one line of usage. Everything else is
-        // in /tokens, which can paste it into the prompt.
+        // in /claude tokens, which can paste it into the prompt.
         const view = () => {
           const id = props.session_id
           const c = compoOf(id)
@@ -1587,14 +1607,26 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
     },
   })
 
-  api.keymap.registerLayer({
+  // The palette entries, each runnable on its own. `/claude` reaches the same
+  // functions with parsed arguments; the palette passes none.
+  type Entry = {
+    name: string
+    title: string
+    category: string
+    namespace: string
+    run: (args?: Args) => void | Promise<void>
+  }
+  const layerOf = (layer: {
+    commands: Entry[]
+    bindings: { key: string; cmd: string; desc: string }[]
+  }) => layer
+  const palette = layerOf({
     commands: [
       {
         name: "claude-auth.select",
         title: paletteTitle("Accounts", "Switch account or preset"),
         category: "Claude Auth",
         namespace: "palette",
-        slashName: "cc-account",
         run: () => openAccountPicker(),
       },
       {
@@ -1602,8 +1634,8 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
         title: paletteTitle("Diagnostics", "Recent requests"),
         category: "Claude Auth",
         namespace: "palette",
-        slashName: "cc-requests",
-        run() {
+        run(input) {
+          const w = input?.window ?? DEFAULT_WINDOW
           // The usage log is keyed by account id; names come from the sources.
           const nameOf = (id: string) => {
             const names = displayNames()
@@ -1615,18 +1647,15 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
             )
           }
           const list = (onlySession: boolean) => {
-            const rows = recentRequests(
-              readUsage(Date.now() - 24 * 3_600_000),
-              {
-                ...(onlySession && lastSessionId
-                  ? { session: lastSessionId }
-                  : {}),
-                limit: 60,
-              },
-            )
+            const rows = recentRequests(readUsage(Date.now() - windowMs(w)), {
+              ...(onlySession && lastSessionId
+                ? { session: lastSessionId }
+                : {}),
+              limit: 60,
+            })
             api.ui.dialog.replace(() => (
               <api.ui.DialogSelect
-                title={`Recent requests (${onlySession ? "this session" : "all sessions"}, 24h)`}
+                title={`Recent requests (${onlySession ? "this session" : "all sessions"}, ${w})`}
                 options={[
                   {
                     title: onlySession
@@ -1682,7 +1711,6 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
         title: paletteTitle("Diagnostics", "Explain routing"),
         category: "Claude Auth",
         namespace: "palette",
-        slashName: "cc-debug",
         async run() {
           // Re-read everything from disk first, so the report describes the
           // state as it is rather than as this process last cached it.
@@ -1783,13 +1811,12 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
         title: paletteTitle("Optimize", "Ranked fixes"),
         category: "Claude Auth",
         namespace: "palette",
-        slashName: "optimize",
         run() {
           const sid = lastSessionId
           if (!sid) {
             api.ui.toast({
               variant: "warning",
-              message: "Open a session first, then run /optimize.",
+              message: "Open a session first, then run /claude optimize.",
             })
             return
           }
@@ -1801,13 +1828,12 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
         title: paletteTitle("Usage", "Token usage"),
         category: "Claude Auth",
         namespace: "palette",
-        slashName: "tokens",
         run() {
           const sid = lastSessionId
           if (!sid) {
             api.ui.toast({
               variant: "warning",
-              message: "Open a session first, then run /tokens.",
+              message: "Open a session first, then run /claude tokens.",
             })
             return
           }
@@ -1819,9 +1845,9 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
         title: paletteTitle("Usage", "Usage by session"),
         category: "Claude Auth",
         namespace: "palette",
-        slashName: "cc-stats",
-        run() {
-          const since = Date.now() - 24 * 60 * 60_000
+        run(input) {
+          const w = input?.window ?? DEFAULT_WINDOW
+          const since = Date.now() - windowMs(w)
           // Read once and reuse: this is the only file scan in the plugin, and
           // the detail view would otherwise repeat it on every selection.
           const events = readUsage(since)
@@ -1830,13 +1856,13 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
             const rows = sessionRows(summarizeSessions(events))
             api.ui.dialog.replace(() => (
               <api.ui.DialogSelect
-                title={`Usage by session, last 24h (${rows.length})`}
+                title={`Usage by session, last ${w} (${rows.length})`}
                 options={
                   rows.length > 0
                     ? rows
                     : [
                         {
-                          title: "No requests recorded in the last 24h",
+                          title: `No requests recorded in the last ${w}`,
                           value: "",
                           description:
                             "Sessions appear here once the plugin has served a request for them.",
@@ -1891,7 +1917,6 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
         title: paletteTitle("Presets", "Edit presets"),
         category: "Claude Auth",
         namespace: "palette",
-        slashName: "cc-presets",
         run() {
           // Presets live on the Manage accounts menu, under their own category:
           // a new preset, and each existing one with its accounts, knobs,
@@ -1913,12 +1938,12 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
         title: paletteTitle("Cache", "Review impact and settings"),
         category: "Claude Auth",
         namespace: "palette",
-        slashName: "cc-cache",
-        run() {
+        run(input) {
+          const w = input?.window ?? DEFAULT_WINDOW
           // The request log carries the token counts the quota cache cannot:
           // reads, writes and uncached input per request. cacheViewRows totals
           // them per account and per session and labels each miss by cause.
-          const since = Date.now() - 24 * 60 * 60_000
+          const since = Date.now() - windowMs(w)
           const requests = requestsFromUsage(readUsage(since))
           // Empty unless captureRequests is on; then misses get real causes.
           let shapes: CacheShape[] = []
@@ -1955,7 +1980,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
               title: r.label,
               description: r.value,
               value: r.setting ? `set:${r.setting}` : `impact:${j}`,
-              category: "Impact (24h) \u00b7 select a setting to change it",
+              category: `Impact (${w}) \u00b7 select a setting to change it`,
             }))
             const blocks = cacheBreakdownBlocks(
               cacheBreakdown(toCacheRows(requests, shapes)),
@@ -1988,7 +2013,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
                     ? options
                     : [
                         {
-                          title: "No requests in the last 24h",
+                          title: `No requests in the last ${w}`,
                           value: "",
                           description:
                             "cache figures appear once the plugin has served requests",
@@ -2006,7 +2031,6 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
         title: paletteTitle("Accounts", "Manage accounts"),
         category: "Claude Auth",
         namespace: "palette",
-        slashName: "cc-accounts",
         run() {
           const configFile = candidatePaths()[0]!
 
@@ -3466,8 +3490,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
         title: paletteTitle("Settings", "Edit settings"),
         category: "Claude Auth",
         namespace: "palette",
-        slashName: "cc-config",
-        run() {
+        run(input) {
           const openList = () => {
             const cfg = getConfig() as unknown as Record<string, unknown>
             api.ui.dialog.replace(() => (
@@ -3559,6 +3582,24 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
             ))
           }
 
+          // `/claude config <setting> <value>` arrives with both chosen.
+          const typed = input?.setting
+          const typedValue = input?.value
+          const meta = EDITABLE.find((e) => e.key === typed)
+          if (typed && meta && typedValue !== undefined) {
+            const checked =
+              meta.kind === "text"
+                ? { ok: true as const, literal: toLiteral("text", typedValue) }
+                : validateValue(meta, typedValue)
+            if (checked.ok) write(typed, checked.literal)
+            else
+              api.ui.toast({
+                variant: "error",
+                title: `${typed} unchanged`,
+                message: checked.reason,
+              })
+            return
+          }
           openList()
         },
       },
@@ -3573,6 +3614,206 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
         desc: "Manage accounts",
       },
     ],
+  })
+
+  const entry = (name: string) =>
+    palette.commands.find((e) => e.name === `claude-auth.${name}`)!
+  const toastNow = (message: string, variant: Variant = "info") =>
+    api.ui.toast({ variant, message })
+  const needSession = () => {
+    if (lastSessionId) return lastSessionId
+    toastNow("Open a session first, then run this again.", "warning")
+    return null
+  }
+  const CLEAR = "__clear__"
+
+  // What the sub-commands' pickers are made from, read when one opens.
+  const cfgNow = () => getConfig() as unknown as Record<string, unknown>
+  const settingNow = (key: string) => {
+    const text = display(cfgNow()[key])
+    return text === "(unset)" ? "" : text
+  }
+  const live: Live = {
+    targets() {
+      accounts = loadAccounts()
+      const names = displayNames()
+      const ids = readIdentityCache()
+      const picked = buildPickerOptions({
+        accounts: visible(),
+        names,
+        presets: getConfig().presets,
+        quota: snap().quota,
+        selection: snap().selection,
+        resetFormat: getConfig().resetFormat,
+        identities: ids,
+      })
+      const aliases = (value: string) => {
+        if (value === AUTO_SOURCE) return ["auto"]
+        if (value.startsWith(PRESET_PREFIX)) {
+          const name = value.slice(PRESET_PREFIX.length)
+          return [name, getConfig().presets[name]?.label ?? ""]
+        }
+        return [
+          accounts.find((a) => a.source === value)?.label ?? "",
+          names.get(value) ?? "",
+          ids[value]?.email ?? "",
+        ]
+      }
+      return [
+        ...picked.map((o) => ({
+          ...o,
+          aliases: [...new Set(aliases(o.value).filter(Boolean))],
+        })),
+        {
+          title: "Clear selection",
+          value: CLEAR,
+          description: "the config decides",
+          category: "Balancing",
+          aliases: ["clear"],
+        },
+      ]
+    },
+    currentTarget: () => snap().selection,
+    settings: () =>
+      configRows(cfgNow()).map((r) => ({
+        ...r,
+        aliases: [
+          r.value,
+          EDITABLE.find((e) => e.key === r.value)?.label ?? "",
+        ],
+      })),
+    settingValues(key) {
+      const meta = EDITABLE.find((e) => e.key === key)
+      if (!meta || meta.kind === "text" || meta.kind === "number") return []
+      return optionsFor(meta, cfgNow()[key], getConfig().presets).map((o) => ({
+        ...o,
+        aliases: [o.title],
+      }))
+    },
+    settingNow,
+    flag(name) {
+      const sid = lastSessionId
+      if (name === "credits")
+        return sid && creditsDenied(sid) ? "decline" : "allow"
+      return sid && reserveAllowed(sid) ? "on" : "off"
+    },
+  }
+
+  const dialogs: Dialogs = {
+    select: (o) =>
+      new Promise((resolve) =>
+        api.ui.dialog.replace(
+          () => (
+            <api.ui.DialogSelect
+              title={o.title}
+              current={o.current}
+              options={o.options.map(({ aliases: _aliases, ...row }) => row)}
+              onSelect={(row) => resolve(String(row.value))}
+            />
+          ),
+          () => resolve(undefined),
+        ),
+      ),
+    prompt: (o) =>
+      new Promise((resolve) =>
+        api.ui.dialog.replace(
+          () => (
+            <api.ui.DialogPrompt
+              title={o.title}
+              placeholder={o.placeholder ?? ""}
+              value={o.value ?? ""}
+              onConfirm={(value: string) => resolve(value)}
+              onCancel={() => resolve(undefined)}
+            />
+          ),
+          () => resolve(undefined),
+        ),
+      ),
+    toast: (message, variant) => toastNow(message, variant),
+    close: () => api.ui.dialog.clear(),
+  }
+
+  const runs: Record<CommandName, Run> = {
+    switch(a) {
+      const value = a.target ?? ""
+      saveAccountSource(value === CLEAR ? "" : value)
+      setSnap(read())
+      toastNow(
+        value === CLEAR
+          ? "Selection cleared; the config decides."
+          : "Selection saved; the next request routes to it.",
+        "success",
+      )
+    },
+    accounts: () => entry("accounts").run(),
+    presets: () => entry("presets").run(),
+    credits(a) {
+      const sid = needSession()
+      if (!sid) return
+      if (!getConfig().useCredits)
+        return toastNow("useCredits is off, so there is nothing to decide.")
+      if (a.state === "decline") denyCredits(sid)
+      else allowCredits(sid)
+      toastNow(
+        a.state === "decline"
+          ? "This session will stop rather than spend overflow."
+          : "This session may spend overflow again.",
+        "success",
+      )
+    },
+    reserve(a) {
+      const sid = needSession()
+      if (!sid) return
+      if (a.state === "on") allowReserve(sid)
+      else revokeReserve(sid)
+      toastNow(
+        a.state === "on"
+          ? "This session may now spend accounts past their ceiling."
+          : "This session leaves reserved quota alone.",
+        "success",
+      )
+    },
+    stats: (a) => entry("stats").run(a),
+    tokens() {
+      const sid = needSession()
+      if (sid) openDetails(sid)
+    },
+    cache: (a) => entry("cache").run(a),
+    optimize() {
+      const sid = needSession()
+      if (sid) sendOptimize(sid)
+    },
+    debug: () => entry("debug").run(),
+    requests: (a) => entry("requests").run(a),
+    config: (a) => entry("config").run(a),
+    help: () =>
+      api.ui.dialog.replace(() => (
+        <api.ui.DialogSelect title="/claude commands" options={helpOptions()} />
+      )),
+  }
+  const commands = commandsWith(runs)
+
+  api.keymap.registerLayer({
+    commands: [
+      ...palette.commands.map((e) => ({ ...e, run: () => e.run() })),
+      {
+        name: "claude-auth.command",
+        title: paletteTitle("Commands", "Open /claude"),
+        category: "Claude Auth",
+        namespace: "palette",
+        // The only slash entry: the host completes this name and hands the
+        // rest of the line to run, which picks or parses the sub-command.
+        slashName: SLASH,
+        slashArguments: true,
+        run: (input?: unknown) =>
+          dispatch(typeof input === "string" ? input : "", {
+            commands,
+            live,
+            io: dialogs,
+          }),
+      },
+    ],
+    bindings: palette.bindings,
   })
 }
 
