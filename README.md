@@ -1319,6 +1319,16 @@ export ANTHROPIC_CLI_VERSION=2.2.0
 - If credentials aren't OAuth-based, the auth loader returns `{}` and falls through to API key auth
 - If credentials are unavailable or unreadable, the plugin disables itself and OpenCode continues without Claude auth
 
+## Development: spec first
+
+Behaviour is specified with [OpenSpec](https://github.com/Fission-AI/OpenSpec).
+The current behaviour lives in `openspec/specs/`, one folder per capability.
+Every non-trivial change starts as `openspec/changes/<id>/` with a proposal,
+tasks and spec deltas, validated with `openspec validate --strict` and archived
+after release. `mise install` provides the pinned CLI; `mise run setup` regenerates
+the OpenCode and Claude Code skills and commands. CI runs
+`openspec validate --all --strict`. Code rules are in [AGENTS.md](AGENTS.md).
+
 ## Versioning and releases
 
 This fork has its own version line, separate from upstream: semver from
