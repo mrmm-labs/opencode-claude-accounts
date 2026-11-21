@@ -62,7 +62,7 @@ jobs:
 
       - uses: jdx/mise-action@v2
         with:
-          install_args: npm:@fission-ai/openspec
+          install_args: node npm:@fission-ai/openspec
 
       - run: openspec validate --all --strict
 
