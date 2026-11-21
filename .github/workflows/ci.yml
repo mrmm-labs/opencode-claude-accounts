@@ -54,6 +54,18 @@ jobs:
       # Lists what npm would ship, in the job log.
       - run: npm pack --dry-run
 
+  openspec:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jdx/mise-action@v2
+        with:
+          install_args: npm:@fission-ai/openspec
+
+      - run: openspec validate --all --strict
+
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 15

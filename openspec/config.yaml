@@ -1,0 +1,32 @@
+schema: spec-driven
+
+context: |
+  OpenCode plugin (TypeScript, ESM, zero runtime dependencies) that authenticates the Anthropic
+  provider with Claude Code credentials and balances requests across several Claude accounts.
+  Two OpenCode processes load it: the server plugin (src/index.ts) and the TUI plugin
+  (tui/claude-auth-tui.tsx). They share state only through files; see docs/architecture.md.
+
+  Stack: pnpm, tsc (dist/ is what OpenCode loads), node --test with --experimental-strip-types,
+  oxlint + oxfmt. Tests: pnpm test. Lint: pnpm lint (includes check:structure and check:tui).
+  Build: pnpm build. Rules a change must obey: AGENTS.md. Decisions: docs/adr/.
+
+  Release: release-please from conventional commits (feat = minor, fix = patch, feat! = major).
+  chore, docs and ci commits cut no release. The PR title is the squash commit and is checked
+  by the semantic-pr workflow.
+
+  Behaviour that must not regress (AGENTS.md section 6): switching accounts never re-authenticates;
+  autoSwitch governs only self-initiated moves; a rotation is never persisted; anything that spends
+  another subscription's quota is off by default.
+
+  Never put credentials, real account names or home paths in specs, examples or fixtures.
+
+rules:
+  proposal:
+    - State what is out of scope.
+    - State the config keys, files or tools a change adds or alters, and the default.
+  specs:
+    - Write scenarios as WHEN/THEN; each scenario becomes at least one test.
+    - A requirement that spends another account's quota must state that it is off by default.
+  tasks:
+    - Each task names its verification step (a test, pnpm lint, or pnpm test).
+    - Keep each task under 2 hours.
