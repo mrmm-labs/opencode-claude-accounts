@@ -35,6 +35,13 @@ Design decisions behind these changes are in [docs/adr](docs/adr/README.md); the
 * quota and reserve files are re-read only when they change; the usage index refresh went from about 10 ms to 0.3 ms
 * account profiles are fetched in parallel at start-up
 
+## [5.1.0](https://github.com/mrmm-labs/opencode-claude-accounts/compare/v5.0.0...v5.1.0) (2026-11-24)
+
+
+### Features
+
+* **tui:** name the serving group and account in the prompt chip ([#41](https://github.com/mrmm-labs/opencode-claude-accounts/issues/41)) ([bb379d3](https://github.com/mrmm-labs/opencode-claude-accounts/commit/bb379d3ca6f526755b7ef243c091175c7c70866c))
+
 ## [5.0.0](https://github.com/mrmm-labs/opencode-claude-accounts/compare/v4.0.0...v5.0.0) (2026-11-20)
 
 
