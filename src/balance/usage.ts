@@ -298,12 +298,14 @@ let cachedIndexAt = 0
  * shrink rebuilds from both generations. Parsing the whole 24h log took ~12 ms
  * at 5 MB, paid on the request path every TTL.
  */
+type TailRow = { account: string; at: number; session?: string }
+
 let tail:
   | {
       path: string
       ino: bigint
       offset: number
-      rows: { account: string; at: number }[]
+      rows: TailRow[]
     }
   | undefined
 
@@ -324,17 +326,18 @@ function readRange(path: string, from: number, to: number): Buffer {
 }
 
 /** Complete lines only; returns the bytes consumed so a torn tail is re-read next time. */
-function parseRequestLines(
-  buf: Buffer,
-  out: { account: string; at: number }[],
-): number {
+function parseRequestLines(buf: Buffer, out: TailRow[]): number {
   const end = buf.lastIndexOf(10) + 1
   for (const line of buf.subarray(0, end).toString("utf-8").split("\n")) {
     if (!line.trim()) continue
     try {
       const e = JSON.parse(line) as UsageEvent
       if (e?.kind === "request" && typeof e.created_at === "number")
-        out.push({ account: e.account, at: e.created_at })
+        out.push({
+          account: e.account,
+          at: e.created_at,
+          ...(e.session ? { session: e.session } : {}),
+        })
     } catch {
       continue
     }
@@ -346,7 +349,7 @@ function parseRequestLines(
 export function tailRequests(
   sinceMs: number,
   path: string = usagePath(),
-): { account: string; at: number }[] {
+): TailRow[] {
   let ino: bigint
   let size: number
   try {
@@ -356,11 +359,19 @@ export function tailRequests(
   } catch {
     tail = undefined
     return readUsage(sinceMs, path).flatMap((e) =>
-      e.kind === "request" ? [{ account: e.account, at: e.created_at }] : [],
+      e.kind === "request"
+        ? [
+            {
+              account: e.account,
+              at: e.created_at,
+              ...(e.session ? { session: e.session } : {}),
+            },
+          ]
+        : [],
     )
   }
   if (!tail || tail.path !== path || tail.ino !== ino || size < tail.offset) {
-    const rows: { account: string; at: number }[] = []
+    const rows: TailRow[] = []
     try {
       parseRequestLines(readFileSync(`${path}.1`), rows)
     } catch {
@@ -397,6 +408,22 @@ export function currentUsageIndex(
     cachedIndex = {}
   }
   return cachedIndex
+}
+
+/**
+ * The account key that served a session's newest request, or undefined when it
+ * has none yet. Rows are in log order, so the last match is the newest.
+ */
+export function sessionAccount(
+  session: string,
+  windowMs = 24 * 60 * 60_000,
+  nowMs: number = Date.now(),
+  path: string = usagePath(),
+): string | undefined {
+  const rows = tailRequests(nowMs - windowMs, path)
+  for (let i = rows.length - 1; i >= 0; i--)
+    if (rows[i]!.session === session) return rows[i]!.account
+  return undefined
 }
 
 /** Test seam. */

@@ -43,15 +43,22 @@ const RANK: Record<Health, number> = {
 
 export const OTHER_GROUP = "Other"
 
-/** `Main - Team 1` under `Main` reads `Team 1`; the group already says Main. */
-export function memberName(groupTitle: string, name: string): string {
-  const prefix = name.slice(0, groupTitle.length)
-  if (prefix.toLowerCase() !== groupTitle.toLowerCase()) return name
-  const tail = name.slice(groupTitle.length)
-  // Only at a word boundary: "Mainframe" is not a member of "Main".
-  if (!/^[\s\-\u2013\u2014:\u00b7]/.test(tail)) return name
-  const rest = tail.replace(/^[\s\-\u2013\u2014:\u00b7]+/, "")
-  return rest.length > 0 ? rest : name
+export { memberName } from "./chip.ts"
+
+/**
+ * The label of the group an account is in, or undefined for an ungrouped one.
+ * The first group listing it wins; references resolve as in `groupRows`.
+ */
+export function groupOf(
+  source: string | null,
+  groups: Readonly<Record<string, AccountGroup>>,
+  resolve: (ref: string) => string | undefined,
+): string | undefined {
+  if (!source) return undefined
+  for (const [name, g] of Object.entries(groups))
+    if (g.accounts.some((ref) => resolve(ref) === source))
+      return g.label ?? name
+  return undefined
 }
 
 /**

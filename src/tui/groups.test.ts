@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 
 import type { QuotaCache } from "../balance/index.ts"
-import { groupRows, memberName } from "./groups.ts"
+import { groupOf, groupRows, memberName } from "./groups.ts"
 
 const FUTURE = Math.floor(Date.now() / 1000) + 3600
 
@@ -113,5 +113,22 @@ describe("memberName", () => {
   it("keeps a name that does not start with the group's, or would be empty", () => {
     assert.equal(memberName("Alt", "Main - Team 1"), "Main - Team 1")
     assert.equal(memberName("Main", "Main"), "Main")
+  })
+})
+
+describe("groupOf", () => {
+  const groups = {
+    main: { label: "Main", accounts: ["acme-1", "acme-2"] },
+    alt: { accounts: ["acme-3"] },
+  }
+
+  it("answers the group's label, else its id", () => {
+    assert.equal(groupOf("src-2", groups, resolve), "Main")
+    assert.equal(groupOf("src-3", groups, resolve), "alt")
+  })
+
+  it("is undefined for an ungrouped or absent account", () => {
+    assert.equal(groupOf("src-4", groups, resolve), undefined)
+    assert.equal(groupOf(null, groups, resolve), undefined)
   })
 })

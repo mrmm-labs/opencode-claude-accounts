@@ -512,12 +512,15 @@ dependencies, because the two never share a module.
 A chip beside the prompt:
 
 ```
-⇄ rr-123 · Team 2 · 5h 24%
+⇄ rr · Main → Team 2 · 5h 24%
 ```
 
-The arrangement in force, the account that actually served last, and its 5-hour
-utilisation. Only the 5h window: it is the one that moves during a session, and
-this sits next to an input box.
+The strategy of the preset in force (`rr` is round-robin; a preset with no
+strategy shows its name, auto shows `auto`, a pin shows `📌 pinned`), the
+group and account that served this session's last request, and the account's
+5-hour utilisation. A session with no request yet shows the account that served
+last anywhere. An account in no group shows no group. Only the 5h window: it is
+the one that moves during a session, and this sits next to an input box.
 
 A section in the sidebar, where there is room for the rest:
 

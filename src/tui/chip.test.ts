@@ -28,6 +28,7 @@ import {
   shortModel,
   sidebarLines,
   mostRecentlyObserved,
+  servingSource,
   servedBy,
   utilisation,
   gauge,
@@ -131,7 +132,7 @@ describe("formatChip", () => {
       selection: "preset:rr-123",
       activeSource: "s1",
     })
-    assert.match(chip, /Wings of Freedom/)
+    assert.match(chip, /Wings of Fr…/)
     assert.match(chip, /5h 41%/)
     assert.ok(
       !chip.includes("45%"),
@@ -157,6 +158,78 @@ describe("formatChip", () => {
       "a pin is not balancing and must not claim to be",
     )
     assert.match(pinned, /pinned/, "a pin says so in words, not a glyph")
+  })
+
+  it("says the strategy, group and account, not the preset id", () => {
+    const chip = formatChip({
+      ...base,
+      selection: "preset:rr-123",
+      presets: { "rr-123": { strategy: "round-robin" } },
+      group: "Main",
+      activeSource: "s1",
+    })
+    assert.equal(chip, `⇄ rr${SEP}Main → Wings of Fr…${SEP}5h 41%`)
+    assert.ok(!chip.includes("rr-123"))
+  })
+
+  it("keeps the preset name when it has no strategy", () => {
+    const chip = formatChip({
+      ...base,
+      selection: "preset:rr-123",
+      presets: { "rr-123": {} },
+      activeSource: "s1",
+    })
+    assert.match(chip, /^⇄ rr-123/)
+  })
+
+  it("drops the group's name from the account and omits an absent group", () => {
+    const names = new Map([["s1", "Main - Team 1"]])
+    assert.match(
+      formatChip({
+        ...base,
+        selection: "__auto__",
+        names,
+        group: "Main",
+        activeSource: "s1",
+      }),
+      /auto · Main → Team 1 · 5h 41%$/,
+    )
+    assert.match(
+      formatChip({ ...base, selection: "__auto__", names, activeSource: "s1" }),
+      /auto · Main - Team… · 5h 41%$/,
+    )
+  })
+
+  it("cuts a long group and account name with an ellipsis", () => {
+    const chip = formatChip({
+      ...base,
+      selection: "__auto__",
+      names: new Map([["s1", "A very long account name"]]),
+      group: "An extremely long group",
+      activeSource: "s1",
+    })
+    assert.match(chip, /An extr… → A very long…/)
+    assert.ok(chip.length <= 44, `chip too wide: ${chip.length} - ${chip}`)
+  })
+
+  it("names the account for a subagent session with no request of its own", () => {
+    const quota = {
+      "acme-1": { ...q(0.2), observedAt: 5 },
+    } as unknown as QuotaCache
+    const source = servingSource({
+      accounts: ACCOUNTS,
+      quota,
+      sessionKey: undefined,
+      keysOf: (s) => (s === "s1" ? ["acme-1", s] : [s]),
+    })
+    const chip = formatChip({
+      accounts: ACCOUNTS,
+      quota,
+      selection: "__auto__",
+      activeSource: source,
+    })
+    assert.ok(!chip.includes("no account"), chip)
+    assert.match(chip, /Wings of Fr…/)
   })
 
   it("says so when no account is serving", () => {
@@ -271,6 +344,65 @@ describe("mostRecentlyObserved", () => {
   it("ignores entries with no timestamp instead of ranking them first", () => {
     const cache = { s1: {}, s2: { observedAt: 5 } } as unknown as QuotaCache
     assert.equal(mostRecentlyObserved(cache), "s2")
+  })
+})
+
+describe("servingSource", () => {
+  // Migrated installs key the cache and the usage log by account id.
+  const keysOf = (source: string) =>
+    source === "s1"
+      ? ["acme-1", "s1"]
+      : source === "s2"
+        ? ["acme-2", "s2"]
+        : [source]
+  const cache = {
+    "acme-1": { observedAt: 100 },
+    "acme-2": { observedAt: 300 },
+  } as unknown as QuotaCache
+
+  it("maps an id-keyed observation back to its account", () => {
+    assert.equal(
+      servingSource({ accounts: ACCOUNTS, quota: cache, keysOf }),
+      "s2",
+    )
+  })
+
+  it("prefers the session's own account over the newest observation", () => {
+    assert.equal(
+      servingSource({
+        accounts: ACCOUNTS,
+        quota: cache,
+        sessionKey: "acme-1",
+        keysOf,
+      }),
+      "s1",
+    )
+  })
+
+  it("falls back when the session has no request or an unknown key", () => {
+    for (const sessionKey of [undefined, null, "gone"])
+      assert.equal(
+        servingSource({ accounts: ACCOUNTS, quota: cache, sessionKey, keysOf }),
+        "s2",
+      )
+  })
+
+  it("skips an observation that names no known account", () => {
+    const withGhost = {
+      ...cache,
+      ghost: { observedAt: 999 },
+    } as unknown as QuotaCache
+    assert.equal(
+      servingSource({ accounts: ACCOUNTS, quota: withGhost, keysOf }),
+      "s2",
+    )
+  })
+
+  it("is null when nothing was observed", () => {
+    assert.equal(
+      servingSource({ accounts: ACCOUNTS, quota: {} as QuotaCache, keysOf }),
+      null,
+    )
   })
 })
 

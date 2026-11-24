@@ -15,8 +15,10 @@ import type {
   SessionDetail,
   SessionUsage,
 } from "../balance/index.ts"
+import type { BalanceStrategy } from "../config.ts"
 import {
   accountKey,
+  accountReadKeys,
   creditHeadroom,
   formatDuration,
   quotaEntry,
@@ -30,6 +32,10 @@ export type ChipInput = {
   /** Selection file contents: `preset:<name>`, `__auto__`, or a source. */
   selection: string
   activeSource: string | null
+  /** The serving account's group label, when it is in one. */
+  group?: string
+  /** Presets by name, so the chip can say the strategy instead of the id. */
+  presets?: Record<string, { label?: string; strategy?: string }>
   /**
    * Requests served per account, for the share column. Optional because the
    * chip is useful without it and the caller may not have paid for the read.
@@ -460,6 +466,17 @@ export function shortNames(
   return out
 }
 
+/** `Main - Team 1` under `Main` reads `Team 1`; the group already says Main. */
+export function memberName(groupTitle: string, name: string): string {
+  const prefix = name.slice(0, groupTitle.length)
+  if (prefix.toLowerCase() !== groupTitle.toLowerCase()) return name
+  const tail = name.slice(groupTitle.length)
+  // Only at a word boundary: "Mainframe" is not a member of "Main".
+  if (!/^[\s\-\u2013\u2014:\u00b7]/.test(tail)) return name
+  const rest = tail.replace(/^[\s\-\u2013\u2014:\u00b7]+/, "")
+  return rest.length > 0 ? rest : name
+}
+
 /** Whole percent, or undefined when nothing has been observed for that window. */
 function pct(v: number | undefined): number | undefined {
   return typeof v === "number" ? Math.round(v * 100) : undefined
@@ -539,15 +556,84 @@ export function mostRecentlyObserved(quota: QuotaCache): string | null {
 }
 
 /**
+ * The account serving a session, as a Keychain source.
+ *
+ * The session's own newest request wins: balancing binds per session, so the
+ * newest observation anywhere can belong to another window. Failing that, the
+ * newest observation that names a known account. Both are cache or log KEYS,
+ * which are account ids on migrated installs, so each is matched against every
+ * key an account can be stored under rather than against its source alone --
+ * comparing an id with a source was why the chip said "no account" while one
+ * was serving.
+ */
+export function servingSource(input: {
+  accounts: readonly ChipAccount[]
+  quota: QuotaCache
+  sessionKey?: string | null
+  keysOf?: (source: string) => string[]
+}): string | null {
+  const keysOf = input.keysOf ?? accountReadKeys
+  const find = (key: string) =>
+    input.accounts.find(
+      (a) => a.source === key || keysOf(a.source).includes(key),
+    )?.source
+  if (input.sessionKey) {
+    const s = find(input.sessionKey)
+    if (s) return s
+  }
+  const seen = Object.entries(input.quota ?? {})
+    .flatMap(([key, q]) => {
+      const at = (q as { observedAt?: number } | undefined)?.observedAt
+      return typeof at === "number" ? [{ key, at }] : []
+    })
+    .sort((a, b) => b.at - a.at)
+  for (const { key } of seen) {
+    const s = find(key)
+    if (s) return s
+  }
+  return null
+}
+
+/** Chip tag per strategy; a forgotten strategy is a compile error. */
+const STRATEGY_TAG: Record<BalanceStrategy, string> = {
+  sticky: "sticky",
+  priority: "prio",
+  "least-loaded": "ll",
+  "round-robin": "rr",
+  weighted: "wt",
+  "least-used": "lu",
+  random: "rand",
+  p2c: "p2c",
+  expiring: "exp",
+}
+
+/** Widest group and account in the chip, in cells. */
+const CHIP_GROUP_MAX = 8
+const CHIP_NAME_MAX = 12
+
+/**
  * The one-line chip. Kept to roughly 24 columns because it sits beside the
  * prompt, where anything longer pushes the input around.
  */
 export function formatChip(input: ChipInput): string {
   const active = input.accounts.find((a) => a.source === input.activeSource)
-  const name = active
-    ? (shortNames(input.accounts).get(active.source) ??
+  const full = active
+    ? ((input.names ?? shortNames(input.accounts)).get(active.source) ??
       shortLabel(active.label))
-    : "no account"
+    : undefined
+  // Under its group the account drops the group's name, as in the sidebar.
+  const name = fitText(
+    full === undefined
+      ? "no account"
+      : input.group
+        ? memberName(input.group, full)
+        : full,
+    CHIP_NAME_MAX,
+  )
+  const who =
+    active && input.group
+      ? `${fitText(input.group, CHIP_GROUP_MAX)} \u2192 ${name}`
+      : name
 
   // The 5h window only: this sits beside the prompt, and it is the window that
   // moves during a session. The weekly figure is in the sidebar, which has room.
@@ -555,13 +641,15 @@ export function formatChip(input: ChipInput): string {
     payingNow(input.quota, input.activeSource) ? `${SEP}paid` : ""
   }`
 
+  const preset = input.selection.slice(PRESET.length)
+  const strategy = input.presets?.[preset]?.strategy
   const mode = input.selection.startsWith(PRESET)
-    ? `⇄ ${input.selection.slice(PRESET.length)}`
+    ? `⇄ ${strategy ? ((STRATEGY_TAG as Record<string, string>)[strategy] ?? strategy) : preset}`
     : input.selection === AUTO
       ? "⇄ auto"
       : "📌 pinned"
 
-  return `${mode}${SEP}${name}${load}`
+  return `${mode}${SEP}${who}${load}`
 }
 
 /**
