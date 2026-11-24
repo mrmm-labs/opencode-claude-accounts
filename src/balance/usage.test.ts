@@ -30,6 +30,7 @@ import {
   currentUsageIndex,
   resetUsageCache,
   tailRequests,
+  sessionAccount,
 } from "./usage.ts"
 
 const T0 = 1785000000000
@@ -368,5 +369,31 @@ describe("tailRequests / currentUsageIndex", () => {
     const since = now - 9_500
     assert.deepEqual(fast, usageIndex(summarize(readUsage(since, p), since)))
     resetUsageCache()
+  })
+})
+
+describe("sessionAccount", () => {
+  const line = (account: string, at: number, session?: string) =>
+    `${JSON.stringify({ kind: "request", account, created_at: at, status: 200, duration_ms: 1, ...(session ? { session } : {}) })}\n`
+
+  it("answers the account of the session's newest request", () => {
+    resetUsageCache()
+    const p = join(mkdtempSync(join(tmpdir(), "usage-sess-")), "u.jsonl")
+    writeFileSync(
+      p,
+      line("acme-1", 100, "ses_a") +
+        line("acme-2", 200, "ses_a") +
+        line("acme-3", 300, "ses_b") +
+        line("acme-1", 400),
+    )
+    assert.equal(sessionAccount("ses_a", 1e9, 500, p), "acme-2")
+    assert.equal(sessionAccount("ses_b", 1e9, 500, p), "acme-3")
+  })
+
+  it("is undefined for a session with no request", () => {
+    resetUsageCache()
+    const p = join(mkdtempSync(join(tmpdir(), "usage-sess-")), "u.jsonl")
+    writeFileSync(p, line("acme-1", 100, "ses_a"))
+    assert.equal(sessionAccount("ses_new", 1e9, 500, p), undefined)
   })
 })

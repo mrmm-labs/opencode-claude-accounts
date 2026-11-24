@@ -91,6 +91,7 @@ import {
 import {
   currentUsageIndex,
   readUsage,
+  sessionAccount,
   sessionDetail,
   summarizeSessions,
 } from "../dist/balance/usage.js"
@@ -153,7 +154,7 @@ import {
 import { readIdentityCache } from "../dist/balance/identity.js"
 import { namesBySource } from "../dist/balance/accounts-id.js"
 import { readFolds, toggleFold, writeFolds } from "../dist/tui/fold.js"
-import { groupRows, memberName } from "../dist/tui/groups.js"
+import { groupOf, groupRows, memberName } from "../dist/tui/groups.js"
 import {
   configRows,
   display,
@@ -168,6 +169,7 @@ import {
   buildPickerOptions,
   formatChip,
   mostRecentlyObserved,
+  servingSource,
   contextSummary,
   detailRows,
   enabledSources,
@@ -1246,15 +1248,31 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
   api.slots.register({
     order: 200,
     slots: {
-      session_prompt_right() {
+      session_prompt_right(_ctx, props: { session_id: string }) {
         // No Show gate. Selection and quota come from files and are useful
         // even when the Keychain gives no labels; gating on labels is exactly
         // what made this render as nothing.
+        const text = () => {
+          const s = snap()
+          // Every account, not only the enabled ones: one that is serving must
+          // be named even if the allow-list has since dropped it.
+          const source = servingSource({
+            accounts,
+            quota: s.quota,
+            sessionKey: sessionAccount(props.session_id),
+          })
+          return formatChip({
+            accounts,
+            names: displayNames(),
+            presets: getConfig().presets,
+            group: groupOf(source, getConfig().groups, refToSource),
+            ...s,
+            activeSource: source,
+          })
+        }
         return (
           <box onMouseUp={openAccountPicker}>
-            <text fg={api.theme.current.textMuted}>
-              {formatChip({ accounts: visible(), ...snap() })}
-            </text>
+            <text fg={api.theme.current.textMuted}>{text()}</text>
           </box>
         )
       },
@@ -1281,6 +1299,11 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
               weeklyWarnAt: getConfig().quotaWeeklyWarnAt,
             },
             ...snap(),
+            activeSource: servingSource({
+              accounts: visible(),
+              quota: snap().quota,
+              sessionKey: sessionAccount(props.session_id),
+            }),
           })
         const sections = () =>
           groupRows({
